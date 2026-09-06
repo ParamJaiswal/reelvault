@@ -157,6 +157,54 @@ recall 0.75 · malformed 0.0 · unsupported-kept 0.178 · min-facts 13/13 ·
   parsing; AGENTS.md `date_text` shape is the long-term fix (v0.2
   candidate, not done here).
 
+## Phase 5 — Evidence-visible UI and manual correction ✅
+
+The detail view already showed video, transcript/OCR context, claim, quote,
+evidence source icon, timestamp, and fact Edit/Wrong controls. This phase
+closed the remaining correction gaps:
+
+**Backend (`app/api/main.py`):**
+1. `PATCH /api/reels/{id}` extended: `summary` (text), `categories`
+   (canonicalized case-insensitively against `VALID_CATEGORIES`, deduped,
+   capped 6), `deadline_raw` (parsed deterministically; unparseable → 422,
+   never silently invented), `deadline_remove` (nulls
+   deadline_iso/reminder_iso/deadline_raw).
+2. `POST /api/reels/{id}/facts` — manual fact
+   (`schema_type='note'`, `evidence_source='metadata'`, `user_corrected=1`,
+   `confidence=1.0`).
+3. `DELETE /api/facts/{id}` — permanent removal of a bad fact (ownership-
+   checked, 404 for other users' facts).
+
+**Frontend (`app/static/app.js`, `styles.css`):**
+- ✏️ edit buttons on summary and category chips; ⏰ deadline block with
+  Edit/Remove; ＋ add-fact per knowledge section; Delete per fact row.
+- Evidence timestamps are now `<time data-t>` so click-to-seek works on the
+  quote as well as transcript lines.
+
+**Tests:** `tests/test_phase5_corrections.py` (8 tests) — summary/category
+patch incl. canonicalization, deadline set/unparseable-rejected/remove,
+manual add fact, blank rejection, delete + ownership 404s.
+
+**Verification:**
+- `pytest tests -q --ignore=tests/test_ai_eval.py` → 64 passed, 1 skipped
+  (56 prior + 8 new).
+- `node --check app/static/app.js` → syntax OK.
+
+**Honest caveats:**
+- Found and routed around a real dateutil quirk: `dayfirst=True` flips
+  ISO dates (`2027-06-01` → Jan 6). The correction endpoint uses an ISO
+  fast-path before falling back to `parse_deadline`. The shared
+  `app/knowledge/deadlines.py` parser is UNCHANGED — ISO date_texts from
+  future extractions could still hit this; candidate for a measured eval
+  fix later.
+- Corrections do not re-run extraction or rebuild embeddings/FTS for the
+  corrected fields (summary is in FTS; fact edits change value only).
+  Search may lag behind corrected content until the reel is reprocessed —
+  acceptable for v0.1, revisit if it bites.
+- UI uses native prompt/confirm dialogs (consistent with existing
+  editFact pattern); no new dependencies.
+
 ## Next (per plan)
 
-Phase 5 — Evidence-visible UI and manual correction (see AGENTS.md v0.1 plan).
+Phase 6 — Personal-use validation: two weeks, ≥20 real reels,
+`docs/V0_RETROSPECTIVE.md`.

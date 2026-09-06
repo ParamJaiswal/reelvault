@@ -359,12 +359,13 @@ function factRow(f) {
   const srcIcon = { transcript: "🗣️", ocr: "🖥️", caption: "📝", metadata: "⚙️", vision: "👁️" }[f.evidence_source] || "•";
   return `<tr>
     <td class="fact-field">${esc(f.field.replace(/_/g, " "))}</td>
-    <td class="fact-val">${esc(f.value)}
+    <td class="fact-val">${esc(f.value)}${f.user_corrected ? ' <span class="chip" style="font-size:10px">corrected</span>' : ""}
       ${f.evidence_quote ? `<span class="evidence">
-          <span class="ev-ts">${srcIcon}${ts ? ts : ""}</span>“${esc(f.evidence_quote.slice(0, 160))}”</span>` : ""}
+          <time class="ev-ts" data-t="${f.evidence_t_s ?? ""}" ${f.evidence_t_s != null ? `title="Jump to ${ts}"` : ""}>${srcIcon}${ts ? ts : ""}</time>“${esc(f.evidence_quote.slice(0, 160))}”</span>` : ""}
       <span class="fact-actions">
         <button onclick="editFact(${f.id}, '${esc(f.field)}')">Edit</button>
         <button onclick="markFact(${f.id}, true)">Wrong</button>
+        <button class="danger" onclick="deleteFact(${f.id})">Delete</button>
         <small style="color:var(--muted)">${fmtPct(f.confidence)}%</small>
       </span>
     </td></tr>`;
@@ -383,20 +384,35 @@ function detailHTML(r) {
     ? `<a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">Open original ↗</a>` : "";
   const media = r.media_path ? `<video controls preload="none" style="width:100%;border-radius:12px" src="/media/video/${r.id}"></video>` : "";
 
+  const deadline = (r.deadline_iso || r.deadline_raw) ? `
+    <div class="sec"><h4>⏰ Deadline ${r.deadline_raw ? `<span style="color:var(--muted);font-weight:400">“${esc(r.deadline_raw)}”</span>` : ""}
+      <span class="fact-actions">
+        <button onclick="editDeadline()">Edit</button>
+        <button class="danger" onclick="removeDeadline()">Remove</button>
+      </span></h4>
+      <p style="margin:0">${esc((r.deadline_iso || "").slice(0, 10))}
+        ${r.reminder_iso ? `<span style="color:var(--muted)">· reminder ${esc(r.reminder_iso.slice(0, 10))}</span>` : ""}</p></div>` : "";
+
   return `
   <div class="chips">${(r.categories || []).map(c => `<span class="chip cat">${esc(c)}</span>`).join("")}
+    <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="editCategories()">✏️ categories</button>
     <span class="status-pill st-${esc(r.status)}">${esc(r.status)}</span></div>
   ${media || ""}
   <div class="conf" style="max-width:280px"><span>${fmtPct(r.confidence)}% confidence</span>
     <span class="meter"><i style="width:${fmtPct(r.confidence)}%"></i></span></div>
 
-  <div class="sec"><h4>AI Summary</h4><p style="margin:0">${esc(r.summary || "—")}</p></div>
+  <div class="sec"><h4>AI Summary
+    <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="editSummary()">✏️ edit</button></h4>
+    <p style="margin:0">${esc(r.summary || "—")}</p></div>
+
+  ${deadline}
 
   ${(r.key_takeaways || []).length ? `<div class="sec"><h4>Key Takeaways</h4>
     <ul class="takeaways">${r.key_takeaways.map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>` : ""}
 
   ${Object.entries(factsByType).length ? Object.entries(factsByType).map(([type, fs]) => `
-    <div class="sec"><h4>Extracted Knowledge — ${esc(type)}</h4>
+    <div class="sec"><h4>Extracted Knowledge — ${esc(type)}
+      <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="addFact()">＋ add fact</button></h4>
       <table class="fact-table">${fs.map(factRow).join("")}</table></div>`).join("") : ""}
 
   ${(r.action_items || []).length ? `<div class="sec"><h4>Action Items</h4>
@@ -430,7 +446,7 @@ function wireDetail(r) {
     $("#reel-dialog").close(); nav(state.view); toast("Reel deleted", "ok");
   };
   $$("#dlg-body time[data-t]").forEach(t =>
-    t.onclick = () => { /* seek main video */ const v = $("#dlg-body video"); if (v) { v.currentTime = +t.dataset.t; v.play(); } });
+    t.onclick = () => { /* seek main video */ const v = $("#dlg-body video"); if (v && t.dataset.t) { v.currentTime = +t.dataset.t; v.play(); } });
 }
 window.editFact = async (id) => {
   const val = prompt("Correct this value:");
@@ -442,6 +458,59 @@ window.markFact = async (id, wrong) => {
   if (!wrong) return;
   await api(`/api/facts/${id}`, { method: "PATCH", body: JSON.stringify({ mark_incorrect: true }) });
   toast("Marked incorrect", "ok"); openReel(currentReelId);
+};
+
+window.deleteFact = async (id) => {
+  if (!confirm("Delete this fact permanently?")) return;
+  await api(`/api/facts/${id}`, { method: "DELETE" });
+  toast("Fact deleted", "ok"); openReel(currentReelId);
+};
+
+window.addFact = async () => {
+  const field = prompt("Fact field (e.g. company, deadline, note):");
+  if (field == null) return;
+  const value = prompt("Fact value:");
+  if (value == null || !value.trim()) return;
+  const quote = prompt("Supporting quote from the reel (optional):") ?? "";
+  await api(`/api/reels/${currentReelId}/facts`, {
+    method: "POST",
+    body: JSON.stringify({ field, value, quote }) });
+  toast("Fact added", "ok"); openReel(currentReelId);
+};
+
+window.editSummary = async () => {
+  const r = await api(`/api/reels/${currentReelId}`);
+  const val = prompt("Correct the summary:", r.summary || "");
+  if (val == null) return;
+  await api(`/api/reels/${currentReelId}`, { method: "PATCH",
+    body: JSON.stringify({ summary: val }) });
+  toast("Summary updated", "ok"); openReel(currentReelId);
+};
+
+window.editCategories = async () => {
+  const r = await api(`/api/reels/${currentReelId}`);
+  const cur = (r.categories || []).join(", ");
+  const val = prompt("Categories (comma-separated, max 6):", cur);
+  if (val == null) return;
+  await api(`/api/reels/${currentReelId}`, { method: "PATCH",
+    body: JSON.stringify({ categories: val.split(",").map(s => s.trim()).filter(Boolean) }) });
+  toast("Categories updated", "ok"); openReel(currentReelId);
+};
+
+window.editDeadline = async () => {
+  const r = await api(`/api/reels/${currentReelId}`);
+  const val = prompt("Deadline (plain text, e.g. 'September 15' or '2026-10-01'):", r.deadline_raw || "");
+  if (val == null || !val.trim()) return;
+  await api(`/api/reels/${currentReelId}`, { method: "PATCH",
+    body: JSON.stringify({ deadline_raw: val }) });
+  toast("Deadline updated", "ok"); openReel(currentReelId);
+};
+
+window.removeDeadline = async () => {
+  if (!confirm("Remove this deadline?")) return;
+  await api(`/api/reels/${currentReelId}`, { method: "PATCH",
+    body: JSON.stringify({ deadline_remove: true }) });
+  toast("Deadline removed", "ok"); openReel(currentReelId);
 };
 
 /* ---------------------------------------------------------- top bar */

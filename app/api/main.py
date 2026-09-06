@@ -6,7 +6,7 @@ import logging
 import shutil
 import threading
 import time
-from datetime import date as _date
+from datetime import date as _date, datetime
 from pathlib import Path
 
 import uvicorn
@@ -351,12 +351,53 @@ class ReelPatch(BaseModel):
     starred: bool | None = None
     archived: bool | None = None
     title: str | None = None
+    summary: str | None = None          # manual correction of AI summary
+    categories: list[str] | None = None  # manual correction of categories
+    deadline_raw: str | None = None     # corrected date text (parsed deterministically)
+    deadline_remove: bool = False       # remove deadline entirely
 
 
 @app.patch("/api/reels/{reel_id}")
 def patch_reel(reel_id: int, body: ReelPatch,
                uid: int = Depends(require_auth)):
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    fields = {k: v for k, v in body.model_dump(exclude_unset=True).items()
+              if v is not None and k != "deadline_remove"}
+    if body.deadline_remove:
+        fields.update({"deadline_iso": None, "reminder_iso": None,
+                       "deadline_raw": None})
+    elif body.deadline_raw is not None:
+        from app.knowledge.deadlines import parse_deadline, reminder_for
+
+        raw = body.deadline_raw.strip()
+        # ISO fast-path: dateutil's dayfirst=True flips YYYY-MM-DD dates
+        try:
+            d = _date.fromisoformat(raw)
+            fields.update({"deadline_iso": d.isoformat(),
+                           "reminder_iso": reminder_for(
+                               datetime(d.year, d.month, d.day)).date().isoformat(),
+                           "deadline_raw": raw[:120]})
+        except ValueError:
+            dl = parse_deadline(raw)
+            if dl.date is None:
+                raise HTTPException(422, f"unparseable date: {dl.note}")
+            fields.update({"deadline_iso": dl.date.date().isoformat(),
+                           "reminder_iso": (dl.reminder_date or dl.date)
+                           .date().isoformat(),
+                           "deadline_raw": raw[:120]})
+    if "categories" in fields:
+        from app.knowledge.schemas import VALID_CATEGORIES
+
+        canon = {c.lower(): c for c in VALID_CATEGORIES}
+        cats = []
+        for c in fields["categories"]:
+            key = (c or "").strip().lower()
+            if not key:
+                continue
+            norm = canon.get(key, (c or "").strip()[:40])
+            if norm not in cats:
+                cats.append(norm)
+        fields["categories_json"] = json.dumps(cats[:6])
+        del fields["categories"]
     if not fields:
         raise HTTPException(422, "nothing to update")
     sets = ", ".join(f"{k}=?" for k in fields)
@@ -364,6 +405,47 @@ def patch_reel(reel_id: int, body: ReelPatch,
         db.execute(f"UPDATE reels SET {sets} WHERE id=? AND user_id=?",
                    (*fields.values(), reel_id, uid))
     return {"updated": reel_id}
+
+
+class FactAdd(BaseModel):
+    field: str
+    value: str
+    quote: str = ""
+    t_s: float | None = None
+
+
+@app.post("/api/reels/{reel_id}/facts")
+def add_fact(reel_id: int, body: FactAdd,
+             uid: int = Depends(require_auth)):
+    """Manual fact: user-provided knowledge, not AI output (user_corrected=1)."""
+    field = body.field.strip()[:60]
+    value = body.value.strip()
+    if not field or not value:
+        raise HTTPException(422, "field and value are required")
+    with get_db() as db:
+        r = db.execute("SELECT id FROM reels WHERE id=? AND user_id=?",
+                       (reel_id, uid)).fetchone()
+        if not r:
+            raise HTTPException(404, "Reel not found")
+        cur = db.execute(
+            "INSERT INTO facts(reel_id, schema_type, field, value,"
+            " evidence_source, evidence_quote, evidence_t_s, confidence,"
+            " user_corrected) VALUES (?,?,?,?,?,?,?,?,1)",
+            (reel_id, "note", field, value, "metadata",
+             body.quote.strip() or None, body.t_s, 1.0))
+    return {"added": cur.lastrowid}
+
+
+@app.delete("/api/facts/{fact_id}")
+def delete_fact(fact_id: int, uid: int = Depends(require_auth)):
+    with get_db() as db:
+        f = db.execute(
+            "SELECT f.id FROM facts f JOIN reels r ON r.id=f.reel_id"
+            " WHERE f.id=? AND r.user_id=?", (fact_id, uid)).fetchone()
+        if not f:
+            raise HTTPException(404, "Fact not found")
+        db.execute("DELETE FROM facts WHERE id=?", (fact_id,))
+    return {"deleted": fact_id}
 
 
 @app.patch("/api/facts/{fact_id}")

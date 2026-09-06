@@ -133,3 +133,31 @@ Next:
 - Phase 5 — Evidence-visible UI and manual correction (reel detail:
   claim/quote/timestamp/click-to-seek, edit/delete facts, correct
   summary/category/deadlines).
+
+---
+
+Date: 2026-09-06
+Phase: 4 merged to v0-core + Phase 5 — Evidence-visible UI and manual correction (DONE)
+Done:
+- phase4-agentic (0ff0088) fast-forward-merged into v0-core; no other
+  Phase 4 existed in the repo (verified all worktrees, stashes, dangling
+  checkpoints). Full suite green on the merge: 56 passed, 1 skipped.
+- Phase 5 on branch phase5-agentic:
+  - PATCH /api/reels/{id}: summary, categories (canonicalized vs
+    VALID_CATEGORIES, deduped, max 6), deadline_raw (deterministic parse,
+    ISO fast-path, 422 on unparseable), deadline_remove.
+  - POST /api/reels/{id}/facts (manual fact, user_corrected=1);
+    DELETE /api/facts/{id} (ownership-checked).
+  - UI: edit summary/categories, deadline Edit/Remove, add/delete fact,
+    evidence timestamps click-to-seek.
+  - Found real dateutil quirk: dayfirst=True flips ISO dates; routed
+    around at the correction endpoint (deadlines.py unchanged).
+Verification:
+- pytest tests -q --ignore=tests/test_ai_eval.py -> 64 passed, 1 skipped
+  (56 prior + 8 new tests/test_phase5_corrections.py).
+- node --check app/static/app.js -> syntax OK.
+Blockers:
+- None.
+Next:
+- Commit phase5-agentic, merge to v0-core, then Phase 6 — personal-use
+  validation (2 weeks, >=20 real reels, docs/V0_RETROSPECTIVE.md).

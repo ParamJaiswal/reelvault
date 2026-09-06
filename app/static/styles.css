@@ -192,3 +192,8 @@ table.admin td{padding:8px;border-bottom:1px solid var(--border);vertical-align:
   .brand div:last-child,.nav-btn span,.tagline,.sidebar-foot{display:none}
   #quick-url{width:38vw}
 }
+
+/* phase 5: evidence timestamps seek the video; destructive fact actions */
+.ev-ts{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.ev-ts:hover{color:var(--fg)}
+.fact-actions button.danger:hover{color:var(--danger)}
