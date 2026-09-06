@@ -145,7 +145,13 @@ def create_reel_from_request(uid: int, req: IngestRequest) -> dict:
              resolved.get("media_path"), (req.meta.get("title") or "")[:120]))
         reel_id = cur.lastrowid
         ev_row = None
-    queue.enqueue(reel_id)
+    # URL reels have no media yet: the ingest stage runs download_reel.
+    # enqueue() defaults to STAGES[1:], so ingest must be added explicitly
+    # or the download never runs and media dies with "No media on disk".
+    if resolved.get("needs_download"):
+        queue.enqueue(reel_id, STAGES)
+    else:
+        queue.enqueue(reel_id)
     log.info("ingested reel=%s via %s", reel_id, adapter.name)
     return {"duplicate": False, "reel_id": reel_id, "status": "queued"}
 
@@ -613,7 +619,18 @@ def retry_failed(reel_id: int, uid: int = Depends(require_auth)):
         dead_or_failed = [dict(x)["stage"] for x in db.execute(
             "SELECT stage FROM jobs WHERE reel_id=? AND status IN"
             " ('failed','dead') ORDER BY id", (reel_id,))]
-    if dead_or_failed:
+        row = db.execute(
+            "SELECT media_path, source_url FROM reels WHERE id=?",
+            (reel_id,)).fetchone()
+    if ("media" in dead_or_failed and not row["media_path"]
+            and row["source_url"]):
+        # URL reel that never downloaded: retrying media alone can never
+        # succeed without a download — rebuild the whole chain from ingest
+        with get_db() as db:
+            db.execute("DELETE FROM jobs WHERE reel_id=?", (reel_id,))
+        queue.enqueue(reel_id, STAGES)
+        retried = list(STAGES)
+    elif dead_or_failed:
         for s in dead_or_failed:
             if queue.retry_stage(reel_id, s):
                 retried.append(s)
@@ -622,7 +639,16 @@ def retry_failed(reel_id: int, uid: int = Depends(require_auth)):
                        " error_message=NULL WHERE id=?", (reel_id,))
     if not retried and r["status"] == "failed":
         # rebuild whole chain after failed stage
-        remaining = STAGES[STAGES.index(r["current_stage"]):]
+        with get_db() as db:
+            row = db.execute(
+                "SELECT media_path, source_url FROM reels WHERE id=?",
+                (reel_id,)).fetchone()
+        start = STAGES.index(r["current_stage"])
+        # a URL reel that never downloaded must rebuild from ingest,
+        # otherwise media fails again on missing disk artifacts
+        if start > 0 and not row["media_path"] and row["source_url"]:
+            start = 0
+        remaining = STAGES[start:]
         queue.enqueue(reel_id, remaining)
         retried = remaining
     return {"retrying": retried}

@@ -185,3 +185,24 @@ Next:
   reels/videos (currently 0 real; reels id 1-8 are verification artifacts
   and may be deleted by the owner at will). Then answer and commit
   docs/V0_RETROSPECTIVE.md per AGENTS.md §11 Phase 6.
+
+---
+
+Date: 2026-09-06
+Phase: 7 — URL ingest reliability (core fix verified live)
+Done:
+- Cleanup: removed orphaned lean-rebuild artifacts (v0/, tests_v0/, stale docs/COMPLETION_PLAN.md); suite still green.
+- Phase 7 selected per AGENTS.md table (owner pain: importing real reels by URL); recorded in docs/DECISIONS.md #11.
+- Root cause found live with a real owner URL: stage_ingest (download_reel) was registered but NEVER enqueued — enqueue() defaults to STAGES[1:], URL reels have no media_path, so media died "No media on disk" x3 -> dead. The download was never attempted.
+- Fix 1: create_reel_from_request enqueues the full STAGES chain (incl. ingest) when the adapter declares needs_download (app/api/main.py).
+- Fix 2: retry endpoint — dead media job or failed-state rebuild with media_path NULL + source_url now rebuilds from ingest instead of dead-ending (old jobs wiped, full chain enqueued).
+- Verification live (owner URL https://www.instagram.com/p/DcySzyYS0qB/): reel 10 completed end-to-end — yt-dlp anonymous download (DcySzyYS0qB.mp4, 15.8s), 11 frames, OCR 3 overlays, evidence floor dropped 1 unsupported fact (0 kept; low transcription conf 0.41), embed + finalize done. Reel 9 (legacy broken record) retried -> full chain from ingest -> terminal 'duplicate' of reel 10. No worker crash.
+- 6 regression tests in tests/test_phase7_url_ingest.py (ingest stage enqueued for URLs; uploads unchanged; both retry paths).
+Verification:
+- pytest tests -q --ignore=tests/test_ai_eval.py -> 70 passed, 1 skipped (64 + 6 new).
+- Live: POST /api/reels with real URL -> completed; POST /api/admin/retry/9 -> duplicate terminal state.
+Blockers:
+- None.
+Next:
+- App restart note: server restarted twice during fix (was running old code); current PID serves fixed code.
+- Remaining Phase 7 scope (optional, next session): caption fetch reliability (yt-dlp caption empty on this reel — OCR carried the content), duplicate ingest UX (retry -> duplicate is correct but user-facing message could say so).
