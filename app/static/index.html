@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ReelVault — Your Reels, as Knowledge</title>
+<meta name="theme-color" content="#0b0e14">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/mobile.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">RV</div>
+      <div><h1>ReelVault</h1><span class="tagline">reels → knowledge</span></div>
+    </div>
+    <nav>
+      <button class="nav-btn active" data-view="inbox">📥<span>Inbox</span><em id="badge-inbox" class="badge hidden"></em></button>
+      <button class="nav-btn" data-view="radar">⏰<span>Opportunity&nbsp;Radar</span><em id="badge-radar" class="badge hidden"></em></button>
+      <button class="nav-btn" data-view="jobs">💼<span>Jobs &amp; Internships</span></button>
+      <button class="nav-btn" data-view="learning">🎓<span>Learning</span></button>
+      <button class="nav-btn" data-view="tools">🧰<span>Tools</span></button>
+      <button class="nav-btn" data-view="saved">⭐<span>Saved</span></button>
+      <div class="nav-sep"></div>
+      <button class="nav-btn" data-view="search">🔍<span>Search</span></button>
+      <button class="nav-btn" data-view="assistant">🤖<span>Assistant</span></button>
+      <div class="nav-sep"></div>
+      <button class="nav-btn" data-view="processing">⚙️<span>Processing</span><em id="badge-proc" class="badge hidden"></em></button>
+      <button class="nav-btn" data-view="settings">🔧<span>Settings</span></button>
+    </nav>
+    <div class="sidebar-foot">
+      <div id="health-pill" class="pill warn"><span class="dot"></span>checking…</div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <!-- top bar -->
+    <header id="topbar">
+      <h2 id="view-title">Inbox</h2>
+      <div class="top-actions">
+        <form id="quick-add">
+          <input id="quick-url" type="url" placeholder="Paste an Instagram Reel URL and press Enter" required>
+          <button type="submit" class="btn primary">Add Reel</button>
+        </form>
+        <label class="btn ghost file-label">＋ File<input id="file-input" type="file" accept="video/*" hidden></label>
+        <a class="btn ghost" href="#" id="open-docs" title="API docs">API</a>
+      </div>
+    </header>
+
+    <section id="view" aria-live="polite"><!-- injected --></section>
+  </main>
+</div>
+
+<div id="toast-wrap"></div>
+<nav id="tabbar" aria-label="Primary">
+  <button class="tab-btn active" data-view="inbox"><span class="ico">📥</span>Home<em class="badge hidden"></em></button>
+  <button class="tab-btn" data-view="radar"><span class="ico">⏰</span>Radar<em class="badge hidden"></em></button>
+  <button class="tab-btn" data-view="search"><span class="ico">🔍</span>Search</button>
+  <button class="tab-btn" data-view="assistant"><span class="ico">🤖</span>Ask</button>
+</nav>
+<div id="ptr">pull to refresh</div>
+<dialog id="reel-dialog">
+  <div class="dialog-head">
+    <h3 id="dlg-title">Reel</h3>
+    <div>
+      <button class="btn ghost" id="dlg-star">☆ Star</button>
+      <button class="btn danger ghost" id="dlg-delete">Delete</button>
+      <button class="btn ghost" id="dlg-close">✕</button>
+    </div>
+  </div>
+  <div id="dlg-body" class="dialog-body"></div>
+</dialog>
+
+<script src="/app.js"></script>
+<script src="/onboarding.js"></script>
+<script src="/push-client.js"></script>
+</body>
+</html>

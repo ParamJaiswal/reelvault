@@ -1,0 +1,95 @@
+"""Media fetcher for public Instagram URLs via yt-dlp.
+
+Design: best-effort. If the fetch fails (login-walled, removed, geo, ToS
+automation wall), ingestion still succeeds with metadata-only mode — the UI
+tells the user to attach the file manually. We NEVER bypass auth walls.
+"""
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from app.core.config import settings
+
+log = logging.getLogger("rv.fetch")
+
+YT_DLP_ERRORS_LOGINWALL = ("login required", "private", "rate-limit", "checkpoint")
+
+
+def download_reel(url: str, shortcode: str) -> dict:
+    """Returns {path} on success; raises FetchError with user-safe message.
+
+    Order: yt-dlp (anonymous) -> Playwright w/ disposable IG account
+    (only if IG_USERNAME/IG_PASSWORD env vars are set). We NEVER use the
+    user's own account.
+    """
+    outdir = settings.media_dir / "video"
+    outtmpl = str(outdir / f"{shortcode}.%(ext)s")
+    try:
+        import yt_dlp
+    except ImportError as e:
+        raise FetchError("Downloader not installed.") from e
+
+    opts = {
+        "outtmpl": outtmpl,
+        "format": "mp4/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": 30,
+        "retries": 2,
+        # NOTE: no cookies, no auth impersonation — compliant-by-design
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except Exception as ydl_err:  # noqa: BLE001
+        msg = str(ydl_err).lower()
+        loginwalled = any(k in msg for k in YT_DLP_ERRORS_LOGINWALL)
+        # ---- fallback: disposable-account browser fetch (env-gated) ----
+        from app.pipeline import ig_browser
+
+        if ig_browser.has_ig_credentials():
+            log.info("yt-dlp failed (%s); trying Playwright fallback", msg[:60])
+            result = ig_browser.fetch_reel(url, outdir)
+            if result:
+                return {"path": result["path"],
+                        "caption": "",
+                        "author_handle": "",
+                        "title": result.get("title") or ""}
+        if loginwalled:
+            raise FetchError(
+                "This Reel needs login to view, so it can't be fetched "
+                "automatically. Save the video file and drop it in instead."
+            )
+        raise FetchError(
+            "Couldn't download this Reel (it may be private, deleted, or "
+            "region-locked). You can attach the video file manually."
+        )
+    filename = ydl_prepare_filename(info)
+    p = Path(filename)
+    if not p.exists():
+        # ext may differ; find newest matching prefix
+        cands = sorted(outdir.glob(f"{shortcode}.*"), key=lambda x: x.stat().st_mtime)
+        if not cands:
+            raise FetchError("Download reported success but no file found.")
+        p = cands[-1]
+    meta = {
+        "path": str(p),
+        "caption": (info or {}).get("description") or "",
+        "author_handle": (info or {}).get("uploader") or "",
+        "title": (info or {}).get("title") or "",
+    }
+    log.info("downloaded %s -> %s", url, p.name)
+    return meta
+
+
+def ydl_prepare_filename(info: dict) -> str:
+    # yt_dlp.YoutubeDL.prepare_filename without re-instantiating
+    from yt_dlp import YoutubeDL
+
+    return YoutubeDL({"outtmpl": "%(id)s"}).prepare_filename(info)
+
+
+class FetchError(Exception):
+    pass

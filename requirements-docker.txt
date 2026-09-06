@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+httpx
+yt-dlp
+rapidocr-onnxruntime
+fastembed
+pillow
+numpy
+python-multipart
+python-dateutil
+cryptography
