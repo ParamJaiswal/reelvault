@@ -9,3 +9,4 @@
 8. FTS5 external-content table w/ triggers (migration v2).
 9. Idempotent stages: delete-then-insert derived rows on re-run.
 10. Metadata-only terminal state when media unfetchable (never crash-loop).
+11. Phase 7 selection: best-effort URL ingest reliability (owner pain: importing real reels by URL). First step is reproducing with a real owner-provided reel URL, then fixing narrowly by observed failure mode.

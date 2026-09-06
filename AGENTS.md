@@ -491,7 +491,7 @@ Select exactly one based on observed pain:
 | FTS misses useful semantic queries | Embeddings/vector search |
 | Deadlines are accurate and reminders are valuable | Web Push validation |
 | Queue jobs fail repeatedly | Queue monitoring/hardening |
-| URL import is essential | Best-effort ingest reliability work |
+| URL import is essential | Best-effort ingest reliability work | <-- SELECTED for Phase 7 (owner pain: importing real reels by URL)
 | Facts are inaccurate | Expand golden set and improve extraction/evidence |
 
 Do one item only. Update this plan before starting it.
