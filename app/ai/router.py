@@ -219,6 +219,9 @@ class TaskRouter:
                 f"Extract structured data for a {schema_type.upper()} "
                 "opportunity/content from an Instagram Reel transcript.\n"
                 f"Fill ONLY these fields: {fields}.\n"
+                "Output one fact for EVERY field above that the source "
+                "clearly supports - do not stop after one or two facts; a "
+                "field with no support in the source is simply omitted.\n"
                 "CRITICAL: every non-empty value MUST be supported by a "
                 "verbatim quote from the source.\n"
                 'Return ONLY JSON: {"summary": "...", "key_takeaways": ["..."],'

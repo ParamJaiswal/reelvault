@@ -1,0 +1,32 @@
+{
+  "id": "job-01",
+  "description": "Fictional data-analyst internship reel; hard deadline stated verbally and on screen.",
+  "caption": "Zylker Analytics is hiring! Link in bio.",
+  "transcript": [
+    {"t": 0.0, "text": "Hiring alert! Zylker Analytics is hiring Data Analyst interns in Bangalore."},
+    {"t": 6.0, "text": "This is a fresher role, zero to one years of experience."},
+    {"t": 11.0, "text": "You need SQL, Python and Excel. Stipend is twenty five thousand per month."},
+    {"t": 18.0, "text": "Top performers get a pre-placement offer of eight to ten lakh per annum."},
+    {"t": 24.0, "text": "Apply before September fifteenth at zylker dot example dot com slash careers."}
+  ],
+  "ocr": [
+    {"t": 2.0, "text": "DATA ANALYST INTERN - BANGALORE"},
+    {"t": 25.0, "text": "APPLY BY SEP 15"}
+  ],
+  "expected": {
+    "categories": ["Job", "Internship"],
+    "primary": ["Job", "Internship"],
+    "schema": "job",
+    "fields": {
+      "company": ["zylker"],
+      "role": ["data analyst"],
+      "location": ["bangalore"],
+      "skills": ["sql"],
+      "deadline": ["september"]
+    },
+    "deadlines": [
+      {"what": "application", "date_text": "September 15"}
+    ],
+    "min_facts_kept": 3
+  }
+}

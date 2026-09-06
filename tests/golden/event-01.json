@@ -1,0 +1,23 @@
+{
+  "id": "event-01",
+  "description": "Meetup announcement with registration deadline and location.",
+  "caption": "Bangalore AI meetup this Saturday",
+  "transcript": [
+    {"t": 0.0, "text": "Bangalore AI meetup this Saturday six PM at WeWork Koramangala."},
+    {"t": 8.0, "text": "There is a talk on building agents with LangChain."},
+    {"t": 15.0, "text": "Free entry but seats are limited, register on lu dot meetup dot com slash bangai."}
+  ],
+  "ocr": [
+    {"t": 1.0, "text": "SAT 6PM - WEPWORK KORAMANGALA"}
+  ],
+  "expected": {
+    "categories": ["News", "AI/ML", "Career"],
+    "primary": ["News"],
+    "schema": "event",
+    "fields": {
+      "location": ["koramangala"]
+    },
+    "deadlines": [],
+    "min_facts_kept": 1
+  }
+}

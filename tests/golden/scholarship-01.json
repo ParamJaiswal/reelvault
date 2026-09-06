@@ -1,0 +1,26 @@
+{
+  "id": "scholarship-01",
+  "description": "Scholarship announcement; category is intentionally multi-allowed because the taxonomy has no Scholarship label.",
+  "caption": "KiTech Foundation scholarship 2026",
+  "transcript": [
+    {"t": 0.0, "text": "The KiTech Foundation offers a scholarship for engineering students."},
+    {"t": 6.0, "text": "It covers fifty thousand rupees per year plus mentorship."},
+    {"t": 12.0, "text": "Second and third year undergraduates are eligible."},
+    {"t": 18.0, "text": "Apply online before November thirtieth at kitech dot example dot org."}
+  ],
+  "ocr": [
+    {"t": 19.0, "text": "DEADLINE: NOV 30"}
+  ],
+  "expected": {
+    "categories": ["Career", "Educational", "Job"],
+    "primary": ["Job", "Educational"],
+    "schema": "job",
+    "fields": {
+      "deadline": ["november"]
+    },
+    "deadlines": [
+      {"what": "application", "date_text": "November 30"}
+    ],
+    "min_facts_kept": 1
+  }
+}

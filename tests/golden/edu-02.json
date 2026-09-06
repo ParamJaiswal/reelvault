@@ -1,0 +1,22 @@
+{
+  "id": "edu-02",
+  "description": "Skills tutorial (pandas); few extractable structured fields.",
+  "caption": "Pandas for beginners",
+  "transcript": [
+    {"t": 0.0, "text": "Pandas tutorial for beginners: groupby, merge and pivot tables."},
+    {"t": 8.0, "text": "Groupby splits your dataframe into buckets so you can aggregate each one."},
+    {"t": 16.0, "text": "Merge joins two dataframes on a key column, like SQL joins."},
+    {"t": 24.0, "text": "Full notebook link is below with practice datasets included."}
+  ],
+  "ocr": [
+    {"t": 1.0, "text": "groupby() | merge() | pivot_table()"}
+  ],
+  "expected": {
+    "categories": ["Tutorial", "Data Analytics", "Data Science"],
+    "primary": ["Tutorial", "Educational"],
+    "schema": "education",
+    "fields": {},
+    "deadlines": [],
+    "min_facts_kept": 0
+  }
+}

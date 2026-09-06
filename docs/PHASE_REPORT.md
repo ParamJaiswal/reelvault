@@ -63,9 +63,7 @@ grep -rn "D:/" app --include="*.py"             →  zero hits
 
 ## Next (per plan)
 
-Phase 3 — Core pipeline proof: five real local videos through upload →
-durable queue → artifacts → clean failures. Requires starting
-llama-server + the app, and `testmedia/` samples or fresh recordings.
+Phase 5 — Evidence-visible UI and manual correction (see AGENTS.md v0.1 plan).
 
 ## Phase 3 — Core pipeline proof ✅ (live proof test)
 
@@ -116,3 +114,49 @@ and real video files).
   later.
 - Test reels: 3 scripted real recordings + 2 SAPI-TTS generated +
   1 ffmpeg-generated tiny video in `testmedia/`.
+
+## Phase 4 — Golden extraction evaluation ✅ (baseline v1)
+
+**Test:** `tests/test_ai_eval.py` (rewritten) over `tests/golden/*.json`
+(13 hand-labeled items: job×2, scholarship, edu×3, tool×2, recipe,
+fitness, Hinglish, finance, event). Harness mirrors `stage_classify_extract`'s
+unified text + `build_spans` exactly; metrics cover classification,
+field recall, content presence, evidence kept/dropped/unsupported,
+deadline parse recall, malformed-JSON rate, latency. Still excluded from
+the default suite (needs live llama-server, ~2 min).
+
+**Measured failure → fix (one, prompt-only, in `app/ai/router.py`):**
+- Baseline run #1: field recall 0.176 — extraction returned too few facts
+  (job-01: 1 fact for a 5-field reel). Prompt now requires one fact for
+  every supported field. Result: 0.824 (+0.65), job-01 5/5 fields.
+- Label calibration (not a model fix): `primary` vs wish-list category
+  labels; pre-fix accuracy 0.5 → 0.846 gated on `primary` (near-hit was
+  already 0.846 — model was precise, labels were greedy).
+
+**Baseline v1 metrics** (full table in `docs/EVAL.md`):
+
+cat acc 0.846 · macro-F1 0.680 · field recall 0.824 · deadline parse
+recall 0.75 · malformed 0.0 · unsupported-kept 0.178 · min-facts 13/13 ·
+10.4s/reel. 73 facts kept, 7 hallucinations dropped.
+
+**Verification:**
+- `pytest tests/test_ai_eval.py -q -s` → 1 passed (135s) against live
+  llama-server.
+
+**Honest caveats:**
+- One prompt change to `router.extract` (coverage instruction); schema,
+  evidence thresholds, and pipeline code untouched.
+- Schema drift: education schema predicted for finance/fitness/recipe/
+  hinglish (generic expected) — categories still reasonable.
+- Content presence 0.667 on taxonomy-gap items; OCR-only terms partially
+  lost.
+- Unsupported-kept 0.178 is mostly value normalization ("twenty five
+  thousand" → "25,000"), not invention — review before relaxing
+  thresholds.
+- Deadline recall 0.75: paraphrased date values defeat deterministic
+  parsing; AGENTS.md `date_text` shape is the long-term fix (v0.2
+  candidate, not done here).
+
+## Next (per plan)
+
+Phase 5 — Evidence-visible UI and manual correction (see AGENTS.md v0.1 plan).

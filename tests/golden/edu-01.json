@@ -1,0 +1,22 @@
+{
+  "id": "edu-01",
+  "description": "Concept explainer (RAG); no opportunity.",
+  "caption": "RAG in 60 seconds",
+  "transcript": [
+    {"t": 0.0, "text": "RAG explained in sixty seconds."},
+    {"t": 5.0, "text": "Chunk your documents and embed them into a vector database like FAISS or Qdrant."},
+    {"t": 14.0, "text": "At query time, retrieve the top matching chunks and stuff them into the LLM prompt."},
+    {"t": 23.0, "text": "That is retrieval augmented generation - grounded answers without retraining."}
+  ],
+  "ocr": [],
+  "expected": {
+    "categories": ["Educational", "Tutorial", "AI/ML"],
+    "primary": ["Educational", "Tutorial"],
+    "schema": "education",
+    "fields": {
+      "topic": ["rag"]
+    },
+    "deadlines": [],
+    "min_facts_kept": 1
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "finance-01",
+  "description": "Personal-finance explainer; numbers-heavy, no opportunity.",
+  "caption": "SIP vs lumpsum",
+  "transcript": [
+    {"t": 0.0, "text": "SIP versus lumpsum, explained simply."},
+    {"t": 5.0, "text": "If you have fifty thousand rupees, investing monthly via SIP averages out market volatility."},
+    {"t": 16.0, "text": "Historical index returns are around twelve percent annually."},
+    {"t": 24.0, "text": "Start early, compound longer. That is the whole game."}
+  ],
+  "ocr": [],
+  "expected": {
+    "categories": ["Finance"],
+    "primary": ["Finance"],
+    "schema": "generic",
+    "fields": {},
+    "deadlines": [],
+    "min_facts_kept": 1
+  }
+}

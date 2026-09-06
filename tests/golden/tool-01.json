@@ -1,0 +1,25 @@
+{
+  "id": "tool-01",
+  "description": "Tool recommendation (Whisper); pricing claim is the classic hallucination bait (free vs paid).",
+  "caption": "Stop paying for transcription",
+  "transcript": [
+    {"t": 0.0, "text": "Stop paying for transcription. Whisper runs completely offline on your laptop."},
+    {"t": 8.0, "text": "It supports over ninety languages and is open source from OpenAI."},
+    {"t": 16.0, "text": "Faster whisper makes it five times faster on the same hardware."},
+    {"t": 24.0, "text": "Completely free forever, github repo is on screen."}
+  ],
+  "ocr": [
+    {"t": 25.0, "text": "github.com/openai/whisper"}
+  ],
+  "expected": {
+    "categories": ["Tool", "Productivity"],
+    "primary": ["Tool"],
+    "schema": "tool",
+    "fields": {
+      "tool_name": ["whisper"],
+      "pricing": ["free"]
+    },
+    "deadlines": [],
+    "min_facts_kept": 2
+  }
+}

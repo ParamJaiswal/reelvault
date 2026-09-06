@@ -100,3 +100,36 @@ Blockers:
 - None.
 Next:
 - Phase 4 — Golden extraction evaluation: create initial golden set (tests/golden/), run eval, save baseline metrics in docs/EVAL.md. Do not tune extraction by intuition.
+
+---
+
+Date: 2026-09-06
+Phase: 4 — Golden extraction evaluation (baseline v1, DONE)
+Done:
+- Golden corpus: tests/golden/*.json — 13 hand-labeled items (job x2,
+  scholarship, edu x3, tool x2, recipe OCR-heavy, fitness music-heavy,
+  Hinglish, finance, event) with transcript segments, OCR, captions,
+  primary + acceptable category labels, field needles, deadlines.
+- Harness: tests/test_ai_eval.py rewritten to load the corpus and mirror
+  stage_classify_extract's unified text + build_spans; metrics for
+  category acc/F1 (primary + acceptable), schema agreement, field recall,
+  content presence, evidence kept/dropped/unsupported, deadline parse
+  recall, malformed-JSON rate, latency. Marker ai_eval; excluded from
+  default suite (live model, ~2 min).
+- One measured fix, prompt-only in app/ai/router.py: extraction now
+  requires one fact for every supported field (baseline field recall
+  0.176 -> 0.824; job-01 1 fact -> 9 kept, 5/5 fields).
+- Baseline table + known issues in docs/EVAL.md; report in
+  docs/PHASE_REPORT.md.
+Verification:
+- pytest tests/test_ai_eval.py -q -s -> 1 passed (135s, live llama-server):
+  cat acc 0.846, macro-F1 0.680, field recall 0.824, deadline recall 0.75,
+  malformed 0.0, unsupported-kept 0.178, min-facts 13/13, 10.4s/reel.
+- All 7 acceptance gates green.
+Blockers:
+- None. Schema drift (education for generic content) and content presence
+  0.667 are recorded findings for a later cycle, not blockers.
+Next:
+- Phase 5 — Evidence-visible UI and manual correction (reel detail:
+  claim/quote/timestamp/click-to-seek, edit/delete facts, correct
+  summary/category/deadlines).

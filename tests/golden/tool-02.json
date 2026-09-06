@@ -1,0 +1,23 @@
+{
+  "id": "tool-02",
+  "description": "AI code editor recommendation with subscription pricing.",
+  "caption": "Cursor - the AI code editor",
+  "transcript": [
+    {"t": 0.0, "text": "Cursor is the AI code editor everyone talks about."},
+    {"t": 6.0, "text": "Tab autocomplete, chat with your codebase, and a full agent mode."},
+    {"t": 14.0, "text": "It costs twenty dollars a month with a free tier available."},
+    {"t": 21.0, "text": "A solid alternative to VS Code with copilot."}
+  ],
+  "ocr": [],
+  "expected": {
+    "categories": ["Tool", "AI/ML", "Productivity"],
+    "primary": ["Tool"],
+    "schema": "tool",
+    "fields": {
+      "tool_name": ["cursor"],
+      "pricing": ["twenty"]
+    },
+    "deadlines": [],
+    "min_facts_kept": 2
+  }
+}

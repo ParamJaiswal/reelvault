@@ -1,0 +1,26 @@
+{
+  "id": "recipe-01",
+  "description": "Cooking reel; OCR-heavy - quantities and temperature live on screen, not in speech. Taxonomy gap: no Recipe category, labeled Other.",
+  "caption": "Paneer tikka in the air fryer - 15 minutes!",
+  "transcript": [
+    {"t": 0.0, "text": "Paneer tikka in the air fryer, start to finish."},
+    {"t": 6.0, "text": "Cut the paneer into big cubes and marinate in thick yogurt with the spices."},
+    {"t": 14.0, "text": "Let it sit for twenty minutes so the flavor goes deep."},
+    {"t": 21.0, "text": "Then air fry until the edges char, shake the basket once halfway."}
+  ],
+  "ocr": [
+    {"t": 8.0, "text": "200g PANEER"},
+    {"t": 15.0, "text": "2 tbsp OIL - 1 tsp RED CHILI"},
+    {"t": 22.0, "text": "200C for 12 MIN"}
+  ],
+  "expected": {
+    "categories": ["Other"],
+    "primary": ["Other", "Tutorial"],
+    "schema": "generic",
+    "fields": {
+      "*": ["paneer"]
+    },
+    "deadlines": [],
+    "min_facts_kept": 2
+  }
+}

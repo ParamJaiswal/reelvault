@@ -1,0 +1,24 @@
+{
+  "id": "fitness-01",
+  "description": "Workout reel with loud music: fragmented speech, hard case for extraction. Taxonomy gap: no Fitness category.",
+  "caption": "20-minute HIIT - no equipment",
+  "transcript": [
+    {"t": 0.0, "text": "Okay so this is... twenty minutes... four rounds."},
+    {"t": 8.0, "text": "Burpees first. Then... mountain climbers. Forty seconds on... twenty rest."},
+    {"t": 17.0, "text": "..."},
+    {"t": 26.0, "text": "Last round... push. Cool down stretch after, okay?"}
+  ],
+  "ocr": [
+    {"t": 5.0, "text": "ROUND 1/4 - 40s WORK / 20s REST"}
+  ],
+  "expected": {
+    "categories": ["Personal Advice", "Other"],
+    "primary": ["Other", "Tutorial"],
+    "schema": "generic",
+    "fields": {
+      "*": ["burpee"]
+    },
+    "deadlines": [],
+    "min_facts_kept": 1
+  }
+}

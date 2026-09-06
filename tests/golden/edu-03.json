@@ -1,0 +1,26 @@
+{
+  "id": "edu-03",
+  "description": "Deadline-dense educational announcement: course enrollment with multiple date formats spoken together.",
+  "caption": "Free SQL course - enrollment closes soon",
+  "transcript": [
+    {"t": 0.0, "text": "Our free SQL fundamentals course is open for enrollment."},
+    {"t": 7.0, "text": "Six weeks, self paced, with a certificate at the end."},
+    {"t": 14.0, "text": "Enrollment closes on the 5th of October, and classes start October tenth."},
+    {"t": 23.0, "text": "Register at datacamp dot example dot com slash free"}
+  ],
+  "ocr": [
+    {"t": 15.0, "text": "CLOSES OCT 5"}
+  ],
+  "expected": {
+    "categories": ["Educational", "Tutorial", "Career"],
+    "primary": ["Educational"],
+    "schema": "education",
+    "fields": {
+      "deadline": ["october"]
+    },
+    "deadlines": [
+      {"what": "enrollment", "date_text": "5th of October"}
+    ],
+    "min_facts_kept": 1
+  }
+}

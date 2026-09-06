@@ -1,0 +1,27 @@
+{
+  "id": "job-02",
+  "description": "Backend engineer opening; deadline in caption only, not spoken.",
+  "caption": "Backend roles open at NovaPay - last date October 20th, link in bio.",
+  "transcript": [
+    {"t": 0.0, "text": "NovaPay is hiring backend engineers in Pune, two to four years of experience."},
+    {"t": 7.0, "text": "You should be strong in Go and Kubernetes."},
+    {"t": 13.0, "text": "CTC goes up to thirty lakh for the right candidate."},
+    {"t": 19.0, "text": "Check the careers link in the caption and apply soon."}
+  ],
+  "ocr": [],
+  "expected": {
+    "categories": ["Job"],
+    "primary": ["Job"],
+    "schema": "job",
+    "fields": {
+      "company": ["novapay"],
+      "role": ["backend"],
+      "location": ["pune"],
+      "experience_required": ["two to four"]
+    },
+    "deadlines": [
+      {"what": "application", "date_text": "October 20"}
+    ],
+    "min_facts_kept": 3
+  }
+}

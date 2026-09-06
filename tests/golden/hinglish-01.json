@@ -1,0 +1,22 @@
+{
+  "id": "hinglish-01",
+  "description": "Hinglish career-advice reel; mixed-language hard case, no strict schema fit.",
+  "caption": "Fresher data analyst - 3 tips",
+  "transcript": [
+    {"t": 0.0, "text": "Dekho bhai, fresher data analyst role ke liye teen cheezein chahiye."},
+    {"t": 7.0, "text": "SQL solid hona chahiye, Python basics clear, aur ek achha project portfolio."},
+    {"t": 16.0, "text": "Resume mein yeh teeno highlight karo, recruiter ko turant pasand aata hai."},
+    {"t": 25.0, "text": "Aur haan, LinkedIn profile bhi update kar do."}
+  ],
+  "ocr": [],
+  "expected": {
+    "categories": ["Career", "Educational", "Personal Advice"],
+    "primary": ["Career"],
+    "schema": "generic",
+    "fields": {
+      "*": ["sql"]
+    },
+    "deadlines": [],
+    "min_facts_kept": 1
+  }
+}
