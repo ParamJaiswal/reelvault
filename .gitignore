@@ -12,3 +12,4 @@ android/
 _archive/
 *.pyc
 .env
+backups/
