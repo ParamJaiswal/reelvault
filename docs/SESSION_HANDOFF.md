@@ -161,3 +161,27 @@ Blockers:
 Next:
 - Commit phase5-agentic, merge to v0-core, then Phase 6 — personal-use
   validation (2 weeks, >=20 real reels, docs/V0_RETROSPECTIVE.md).
+
+---
+
+Date: 2026-09-06
+Phase: 6 — personal-use validation (setup complete, usage window open)
+Done:
+- Merged phase5-agentic (7290021) fast-forward into v0-core; v0-core and
+  phase5-agentic both at 7290021.
+- Live smoke test on the running owner instance (:8756) completed: PATCH
+  summary, PATCH ISO deadline, 422 on unparseable deadline, manual fact add,
+  DELETE reel with purge_media all verified with the real bearer token.
+- Scratch smoke-test data removed from the owner DB via the API (reel 9,
+  fact 35, its jobs, embeddings): all verified 0 rows afterward.
+- Created docs/V0_RETROSPECTIVE.md template: starting-point metrics,
+  fill-in metric table, failure log, the plan's five end-of-window questions.
+Blockers:
+- None. (One transient DELETE 401 during the first smoke pass never
+  reproduced; identical require_auth path succeeded on retry — recorded as
+  an invocation issue, not a code defect.)
+Next:
+- Owner uses the app for real for ~2 weeks and processes >= 20 real
+  reels/videos (currently 0 real; reels id 1-8 are verification artifacts
+  and may be deleted by the owner at will). Then answer and commit
+  docs/V0_RETROSPECTIVE.md per AGENTS.md §11 Phase 6.
