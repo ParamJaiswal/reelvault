@@ -45,12 +45,19 @@ def _sim(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+MIN_QUOTE_CHARS = 15  # shorter normalized text can't be verified reliably
+
+
 def find_evidence(quote: str, value: str, spans: list[SourceSpan]) -> EvidenceMatch:
     """Find best-matching source span for a claimed quote/value."""
     qn = norm(quote)
     vn = norm(value)
     probe = qn if len(qn) >= len(vn) else vn
     alt = vn if probe == qn else qn
+    if len(probe) < MIN_QUOTE_CHARS:
+        # A one-word quote would otherwise ride the `a in b` shortcut
+        # straight to a 1.0 similarity and slip past the drop threshold.
+        return EvidenceMatch(similarity=0.0, span=None, n_sources_agreeing=0)
     best_span, best = None, 0.0
     agree = 0
     for sp in spans:
@@ -68,9 +75,11 @@ def find_evidence(quote: str, value: str, spans: list[SourceSpan]) -> EvidenceMa
 
 
 def confidence_score(match_sim: float, n_agree: int,
-                     model_conf: float | None) -> float:
-    ts = 0.25  # we always know timestamps for matched spans
-    multi = min(n_agree - 1, 1) / 1 if n_agree >= 2 else 0
+                     model_conf: float | None,
+                     has_timestamp: bool = False) -> float:
+    """Timestamp weight applies only when a source timestamp exists."""
+    ts = 0.25 if has_timestamp else 0.0
+    multi = 1.0 if n_agree >= 2 else 0.0
     mc = model_conf if model_conf is not None else 0.5
     score = 0.35 * match_sim + ts + 0.2 * multi + 0.2 * mc
     return round(min(max(score, 0.05), 0.99), 2)

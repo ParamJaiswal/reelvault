@@ -11,6 +11,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -29,6 +30,14 @@ from app.ai.providers import get_embedder, get_llm
 log = logging.getLogger("rv.api")
 
 app = FastAPI(title="ReelVault", docs_url="/api/docs", openapi_url="/api/openapi.json")
+_cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _cors_origins == ["*"] else _cors_origins,
+    allow_credentials=_cors_origins != ["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 queue = Queue()
 stg.register_all(queue)
 
@@ -206,7 +215,7 @@ async def share_target(request: Request):
     return RedirectResponse(dest, 303)
 
 
-WATCH_FOLDER = Path("D:/reelvault/watch")
+WATCH_FOLDER = settings.media_dir.parent / "watch"
 
 
 @app.post("/api/watch-folder/scan")
@@ -806,11 +815,16 @@ def worker_loop(poll: float = settings.worker_poll_interval_s):
 @app.on_event("startup")
 def startup():
     setup_logging()
+    from app.core.config import (validate_startup_paths,
+                                 warn_if_owner_credentials_stale)
+
+    validate_startup_paths()       # fail fast on unusable paths
     migrate()
     from app.core import auth as A
     from app.core import push as P
 
     A.ensure_owner_user()          # owner role + first-run credentials file
+    warn_if_owner_credentials_stale()
     P.start_scanner()              # hourly deadline reminders
     from app.core import backups as B
 

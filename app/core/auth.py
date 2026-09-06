@@ -286,6 +286,9 @@ def resolve_request(token: str) -> dict | None:
         with get_db() as db:
             row = db.execute(
                 "SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+        if row is None:
+            log.warning("bootstrap token presented but users table is empty")
+            return None
         return {"user_id": row["id"], "role": "owner"}
     payload = decode_access_jwt(token)
     if payload:

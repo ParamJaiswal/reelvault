@@ -1,7 +1,7 @@
 """Business-SLM provider — ReelVault's own vendored mini-transformer
 (vendored source: vendor/slm, weights: models/biz_slm.pt).
 
-Fully self-contained on D:/reelvault — no external project references.
+Fully self-contained in the repo root — no external project references.
 Honest status (measured Aug 26): the checkpoint is a 6-step smoke train
 (val ppl ~218) producing degenerate output; the ROUTER therefore keeps it
 OFF by default. Enable via RV_SLM_ENABLED=true after real fine-tuning;

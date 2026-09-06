@@ -1,19 +1,22 @@
 """Central configuration via environment (.env supported)."""
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
-APP_ROOT = Path(__file__).resolve().parent.parent.parent  # D:/reelvault
+APP_ROOT = Path(__file__).resolve().parent.parent.parent
+
+log = logging.getLogger("rv.config")
 
 
 class Settings(BaseSettings):
     # --- storage ---
     data_dir: Path = APP_ROOT / "data"
-    models_dir: Path = Path("D:/reelvault/models")
-    media_dir: Path = Path("D:/reelvault/media")
+    models_dir: Path = APP_ROOT / "models"
+    media_dir: Path = APP_ROOT / "media"
     db_path: Path = APP_ROOT / "data" / "reelvault.db"
 
     # --- local model runtime ---
@@ -43,7 +46,7 @@ class Settings(BaseSettings):
     enable_registration: bool = True             # owner can create users via UI/API
 
     # --- backups ---
-    backup_dir: str = "D:/reelvault-backups"
+    backup_dir: str = str(APP_ROOT / "backups")
     backup_encrypt: bool = True
     backup_passphrase: str = ""        # set RV_BACKUP_PASSPHRASE to encrypt
     backup_keep: int = 7               # snapshots to retain
@@ -60,7 +63,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8756
     auth_token: str = ""              # empty -> auto-generate & persist
-    cors_origins: str = "*"           # PWA served same-origin anyway
+    cors_origins: str = ("http://127.0.0.1:8756,http://localhost:8756")
 
     # --- privacy defaults ---
     retention_media_days: int = 30    # 0 = keep forever
@@ -93,3 +96,43 @@ def get_auth_token() -> str:
 
 
 AUTH_TOKEN = get_auth_token()
+
+
+def validate_startup_paths() -> None:
+    """Fail fast with a clear message when required paths are unusable."""
+    problems: list[str] = []
+    warnings: list[str] = []
+
+    for label, path in (("data", settings.data_dir),
+                        ("media", settings.media_dir)):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".rv_write_probe"
+            probe.touch()
+            probe.unlink()
+        except OSError as e:
+            problems.append(f"{label} dir not writable: {path} ({e})")
+    try:
+        settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        problems.append(f"DB dir not creatable: {settings.db_path.parent} ({e})")
+
+    if not settings.models_dir.exists():
+        warnings.append(
+            f"models dir missing: {settings.models_dir} — set RV_MODELS_DIR "
+            "or extraction will fail")
+
+    if problems:
+        raise RuntimeError("Startup path validation failed:\n- "
+                           + "\n- ".join(problems))
+    for w in warnings:
+        log.warning("%s", w)
+
+
+def warn_if_owner_credentials_stale() -> None:
+    cred_file = settings.data_dir / ".owner_credentials.txt"
+    if cred_file.exists():
+        log.warning(
+            "Owner credentials file still present (%s) — the password may "
+            "still be the auto-generated one. Change it, then delete the "
+            "file.", cred_file)

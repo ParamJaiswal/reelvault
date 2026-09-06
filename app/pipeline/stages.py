@@ -280,7 +280,9 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
         if m.similarity < HALLUCINATION_THRESHOLD:
             dropped.append({"field": f.get("field"), "value": val})
             continue
-        conf = confidence_score(m.similarity, m.n_sources_agreeing, None)
+        conf = confidence_score(
+            m.similarity, m.n_sources_agreeing, None,
+            has_timestamp=bool(m.span and m.span.t_s is not None))
         verified_facts.append({
             "schema_type": schema_type if schema_type != "generic" else "note",
             "field": (f.get("field") or "note")[:60],

@@ -91,9 +91,10 @@ class Queue:
             for r in rows:
                 cur.execute(
                     "UPDATE jobs SET status='running', heartbeat=?, updated_at=?"
-                    " WHERE id=? AND status IN ('queued','running')"
+                    " WHERE id=? AND (status='queued' OR (status='running'"
+                    " AND heartbeat<?))"
                     " RETURNING id, reel_id, stage, attempts, max_attempts, payload_json",
-                    (now, now, r["id"]),
+                    (now, now, r["id"], stale_cutoff),
                 )
                 claimed = cur.fetchone()
                 if claimed:

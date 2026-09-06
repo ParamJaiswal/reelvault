@@ -33,7 +33,7 @@ def _port_open(host: str, port: int) -> bool:
 
 
 def _paths() -> tuple[Path, Path]:
-    root = settings.models_dir.parent          # D:/reelvault
+    root = settings.models_dir.parent
     return (root / "llamacpp" / "llama-server.exe",
             settings.models_dir / "qwen2.5-3b-instruct-q4_k_m.gguf")
 

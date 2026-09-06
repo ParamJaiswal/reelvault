@@ -63,3 +63,21 @@ Blockers:
 - Tests grew 36 → 40 since Aug 26 — growth unexplained but suite is green.
 Next:
 - Phase 1 — Correctness fixes: evidence quote minimum length, confidence when t_s missing, empty-users bootstrap guard, queue claim heartbeat re-check, focused regression tests for all four.
+
+---
+
+Date: 2026-09-06
+Phase: 1 + 2 — Correctness fixes and configuration/security minimum (DONE)
+Done:
+- Phase 1: evidence quote floor (MIN_QUOTE_CHARS=15), honest confidence without timestamp, empty-users bootstrap guard, queue claim heartbeat re-check in claim UPDATE.
+- Phase 2: repo-relative path defaults (models/media/backup), WATCH_FOLDER from settings, startup path validation with clear errors, CORS middleware wired with restricted default, stale owner-credentials warning.
+- 14 focused regression tests added (tests/test_phase1_fixes.py, tests/test_phase2_config.py).
+- Full report: docs/PHASE_REPORT.md.
+Verification:
+- pytest tests -q --ignore=tests/test_ai_eval.py → 54 passed (was 40 baseline).
+- grep -rn "D:/" app --include="*.py" → zero hits.
+- Each regression test fails on pre-fix code (verified during development: 3 failures traced to test setup, then green).
+Blockers:
+- None. v0/ + tests_v0/ lean artifacts still orphaned — recommend removal.
+Next:
+- Phase 3 — Core pipeline proof: five real local videos through upload → queue → artifacts → clean failures (needs llama-server + app started, testmedia samples).
