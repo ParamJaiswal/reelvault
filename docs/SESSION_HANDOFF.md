@@ -81,3 +81,22 @@ Blockers:
 - None. v0/ + tests_v0/ lean artifacts still orphaned — recommend removal.
 Next:
 - Phase 3 — Core pipeline proof: five real local videos through upload → queue → artifacts → clean failures (needs llama-server + app started, testmedia samples).
+
+---
+
+Date: 2026-09-06
+Phase: 3 — Core pipeline proof (DONE)
+Done:
+- Live proof test tests/test_phase3_pipeline_proof.py (RV_PHASE3=1 gate): 5 real reels complete end-to-end (artifacts, summary, evidence-backed facts, FTS retrieval per keyword); corrupt upload fails cleanly (reel failed, job dead-lettered, downstream not done, worker alive — proved by processing a 7th tiny video after the corrupt failure).
+- stage_media stale-artifact purge (audio/thumb/frames keyed by bare reel id collided across runs) + immediate fail + StageCancelled on fatal MediaError.
+- Queue dead-letter marks reel failed and deletes queued downstream jobs; _guard added at top of all 6 downstream stages.
+- ensure_owner_user() creates first owner on fresh DB instead of raising.
+- Proof-test fix: _reel_state() SELECT omitted summary/error_message — assertion could never pass (test bug; pipeline was already green per DB inspection).
+- Full report: docs/PHASE_REPORT.md (Phase 3 section).
+Verification:
+- RV_PHASE3=1 pytest tests/test_phase3_pipeline_proof.py -v → 1 passed, 202.59s, 6 uploads.
+- pytest tests -q --ignore=tests/test_ai_eval.py → 56 passed, 1 skipped (proof gate).
+Blockers:
+- None.
+Next:
+- Phase 4 — Golden extraction evaluation: create initial golden set (tests/golden/), run eval, save baseline metrics in docs/EVAL.md. Do not tune extraction by intuition.

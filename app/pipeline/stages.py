@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -95,7 +96,22 @@ def stage_ingest(reel_id: int, payload: dict) -> None:
         ev(db, reel_id, "ingest", f"downloaded {Path(meta['path']).name}")
 
 
+def _guard(reel_id: int) -> None:
+    """Downstream stages must refuse to run once the reel failed upstream —
+    running on missing artifacts produced garbage (corrupt video reaching
+    'completed'/'duplicate')."""
+    from app.db.queue import StageCancelled
+
+    with get_db() as db:
+        row = db.execute("SELECT status FROM reels WHERE id=?",
+                         (reel_id,)).fetchone()
+    if row and row["status"] == "failed":
+        raise StageCancelled(
+            f"reel {reel_id} failed upstream — stage cancelled")
+
+
 def stage_media(reel_id: int, payload: dict) -> None:
+    _guard(reel_id)
     with get_db() as db:
         reel = get_reel(db, reel_id)
         set_reel(db, reel_id, current_stage="media", progress=0.15)
@@ -104,12 +120,35 @@ def stage_media(reel_id: int, payload: dict) -> None:
     if not mp or not Path(mp).exists():
         raise MediaError("No media on disk for media stage")
 
-    info = validate_video(mp)
-    wav = settings.media_dir / "audio" / f"r{reel_id}.wav"
-    thumb = settings.media_dir / "frames" / f"thumb_r{reel_id}.jpg"
-    extract_audio(mp, str(wav))
-    make_thumb(mp, str(thumb))
-    frames = sample_frames(mp, reel_id, info["duration_s"])
+    # Purge artifacts any earlier reel left under this id (fresh DB + shared
+    # media dir would otherwise leak old audio/frames into this reel — seen
+    # live: a stale r6.wav gave a corrupt upload another reel's transcript).
+    for stale in (settings.media_dir / "audio" / f"r{reel_id}.wav",
+                  settings.media_dir / "frames" / f"thumb_r{reel_id}.jpg"):
+        stale.unlink(missing_ok=True)
+    stale_dir = settings.media_dir / "frames" / str(reel_id)
+    if stale_dir.exists():
+        shutil.rmtree(stale_dir, ignore_errors=True)
+
+    try:
+        info = validate_video(mp)
+        wav = settings.media_dir / "audio" / f"r{reel_id}.wav"
+        thumb = settings.media_dir / "frames" / f"thumb_r{reel_id}.jpg"
+        extract_audio(mp, str(wav))
+        make_thumb(mp, str(thumb))
+        frames = sample_frames(mp, reel_id, info["duration_s"])
+    except MediaError as e:
+        # Corrupt/unprocessable media is fatal, not transient: fail the reel
+        # NOW so downstream stages cancel via the guard instead of running
+        # on missing artifacts during this job's retry backoff window.
+        with get_db() as db:
+            set_reel(db, reel_id, status="failed",
+                     error_message=str(e)[:500], progress=1.0)
+            db.execute("DELETE FROM jobs WHERE reel_id=? AND status='queued'",
+                       (reel_id,))
+            ev(db, reel_id, "media", str(e)[:200], level="warn")
+        from app.db.queue import StageCancelled
+        raise StageCancelled(f"media unprocessable: {e}") from e
 
     content_hash = None
     try:
@@ -150,6 +189,7 @@ def sha_of_file(path: str, chunk: int = 1 << 20) -> str:
 
 
 def stage_transcribe(reel_id: int, payload: dict) -> None:
+    _guard(reel_id)
     with get_db() as db:
         reel = get_reel(db, reel_id)
         set_reel(db, reel_id, current_stage="transcribe", progress=0.35)
@@ -184,6 +224,7 @@ def stage_transcribe(reel_id: int, payload: dict) -> None:
 
 
 def stage_ocr(reel_id: int, payload: dict) -> None:
+    _guard(reel_id)
     ocr = providers.get_ocr()
     if ocr is None:
         with get_db() as db:
@@ -225,6 +266,7 @@ def stage_ocr(reel_id: int, payload: dict) -> None:
 
 
 def stage_classify_extract(reel_id: int, payload: dict) -> None:
+    _guard(reel_id)
     with get_db() as db:
         reel = get_reel(db, reel_id)
         set_reel(db, reel_id, current_stage="classify_extract", progress=0.65)
@@ -391,6 +433,7 @@ def radar_priority(schema_type: str, facts: list[dict], extraction: dict) -> int
 
 
 def stage_embed(reel_id: int, payload: dict) -> None:
+    _guard(reel_id)
     emb = providers.get_embedder()
     with get_db() as db:
         set_reel(db, reel_id, current_stage="embed", progress=0.85)
@@ -440,6 +483,7 @@ def stage_embed(reel_id: int, payload: dict) -> None:
 def stage_finalize(reel_id: int, payload: dict) -> None:
     # duplicate check runs at finalize: cheapest similarity first (hash/url),
     # then embedding cosine against other reels' summary vectors.
+    _guard(reel_id)
     with get_db() as db:
         reel = get_reel(db, reel_id)
         dup_of = None

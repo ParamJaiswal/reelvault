@@ -66,3 +66,53 @@ grep -rn "D:/" app --include="*.py"             →  zero hits
 Phase 3 — Core pipeline proof: five real local videos through upload →
 durable queue → artifacts → clean failures. Requires starting
 llama-server + the app, and `testmedia/` samples or fresh recordings.
+
+## Phase 3 — Core pipeline proof ✅ (live proof test)
+
+**Test:** `tests/test_phase3_pipeline_proof.py` — gated behind `RV_PHASE3=1`
+(skipped in normal suite runs; it is a slow live run needing llama-server
+and real video files).
+
+**What it proves (6 uploads, ~3.5 min wall time):**
+- 5 real reels (job/edu/tool/recipe/fitness) uploaded via
+  `POST /api/reels/upload` → durable queue → all stages → `completed`
+  with media, thumb, 12 frames, OCR results, transcript segments,
+  non-empty summary, and evidence-backed facts (2/4/1/3/5 per reel).
+- 1 corrupt upload (garbage bytes) → reel `failed` with readable error,
+  its media job dead-lettered, downstream jobs dead-or-deleted (NOT
+  `done`), worker stayed alive (verified via `/healthz` + a 7th tiny
+  video processed successfully after the corrupt failure).
+- FTS search retrieves each reel by its caption keyword.
+
+**Fixes made during proof (uncovered by the live run):**
+1. `stage_media` stale-artifact purge — artifacts were keyed by bare
+   reel id (`media/audio/r6.wav`); a stale Aug-26 `r6.wav` made a corrupt
+   upload inherit another reel's transcript/facts. Purge now removes
+   `audio/r{id}.wav`, `thumb_r{id}.jpg`, `frames/{id}/` before extraction;
+   fatal `MediaError` marks the reel failed immediately + raises
+   `StageCancelled` (closes the retry-window race where downstream jobs
+   could still run).
+2. Queue dead-letter now marks the reel failed and deletes queued
+   downstream jobs (`app/db/queue.py`).
+3. `ensure_owner_user()` creates the first owner on a fresh DB instead
+   of raising (`app/core/auth.py`).
+4. Guard (`_guard`) at top of all 6 downstream stages: cancel if the
+   reel is already failed/dead-lettered.
+5. Proof-test bug: `_reel_state()` SELECT omitted `summary` and
+   `error_message`, so the summary assertion could never pass. Fixed
+   (test-code bug, not pipeline bug — DB inspection proved the pipeline
+   green before the test fix).
+
+**Verification:**
+- `RV_PHASE3=1 pytest tests/test_phase3_pipeline_proof.py -v` →
+  1 passed (202.59s), 6 uploads, all assertions green.
+- `pytest tests -q --ignore=tests/test_ai_eval.py` → 56 passed, 1 skipped.
+
+**Honest caveats:**
+- Transcription used torch-whisper fallback (faster_whisper not
+  installed in this venv) — see Phase 1 report caveat.
+- Corrupt-input media stage took ~3 min (ffmpeg/ffprobe timeouts on
+  garbage bytes) before failing — acceptable for v0.1, could be tuned
+  later.
+- Test reels: 3 scripted real recordings + 2 SAPI-TTS generated +
+  1 ffmpeg-generated tiny video in `testmedia/`.

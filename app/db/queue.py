@@ -21,6 +21,12 @@ from app.db.schema import connect
 
 log = logging.getLogger("rv.queue")
 
+
+class StageCancelled(Exception):
+    """Raised by a stage when the reel already failed upstream — the job is
+    dead-lettered quietly instead of retried or treated as a reel error."""
+
+
 STAGES = [
     "ingest",
     "media",
@@ -124,7 +130,7 @@ class Queue:
         now = time.time()
         with _q() as conn:
             row = conn.execute(
-                "SELECT attempts, max_attempts, stage FROM jobs WHERE id=?",
+                "SELECT attempts, max_attempts, stage, reel_id FROM jobs WHERE id=?",
                 (job_id,)).fetchone()
             if row is None:
                 return "gone"
@@ -132,6 +138,17 @@ class Queue:
             if attempts >= row["max_attempts"]:
                 status = "dead"
                 run_after = now
+                # A permanently dead stage poisons everything after it: running
+                # downstream stages on missing artifacts produced garbage
+                # (corrupt videos reaching 'completed'/'duplicate').
+                conn.execute(
+                    "UPDATE reels SET status='failed', error_message=?,"
+                    " completed_at=? WHERE id=?",
+                    (error[:500], time.strftime("%Y-%m-%d %H:%M:%S"),
+                     row["reel_id"]))
+                conn.execute(
+                    "DELETE FROM jobs WHERE reel_id=? AND status='queued' AND id!=?",
+                    (row["reel_id"], job_id))
             else:
                 status = "queued"
                 run_after = now + settings.retry_backoff_s * (2 ** (attempts - 1))
@@ -164,6 +181,19 @@ class Queue:
                 self.heartbeat(job["id"])
                 handler(job["reel_id"], payload)
                 self.complete(job["id"])
+            except StageCancelled as e:
+                # Reel already failed upstream; kill this job and anything
+                # still queued behind it. Not a new reel error.
+                with _q() as conn:
+                    conn.execute(
+                        "UPDATE jobs SET status='dead', last_error=?,"
+                        " updated_at=? WHERE id=?",
+                        (str(e)[:2000], time.time(), job["id"]))
+                    conn.execute(
+                        "DELETE FROM jobs WHERE reel_id=? AND status='queued'",
+                        (job["reel_id"],))
+                log.info("stage cancelled reel=%s stage=%s",
+                         job["reel_id"], job["stage"])
             except Exception as e:  # noqa: BLE001 - worker boundary
                 log.exception("handler error stage=%s", job["stage"])
                 self.fail(job["id"], f"{type(e).__name__}: {e}")

@@ -108,11 +108,26 @@ def decode_access_jwt(token: str) -> dict[str, Any] | None:
 
 # ------------------------------------------------------------------ users
 def ensure_owner_user() -> dict:
-    """The original local user becomes owner with a default password file."""
+    """Fresh installs get a first owner with auto-generated credentials."""
     with get_db() as db:
         row = db.execute("SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
         if row is None:
-            raise RuntimeError("no user exists")
+            pw = secrets.token_urlsafe(10)
+            pw_hash, salt = hash_password(pw)
+            cur = db.execute(
+                "INSERT INTO users(username, display_name, api_key_hash,"
+                " role, password_hash, password_salt)"
+                " VALUES ('owner','Owner','', 'owner', ?, ?)",
+                (pw_hash, salt))
+            uid = cur.lastrowid
+            row = dict(db.execute("SELECT * FROM users WHERE id=?",
+                                  (uid,)).fetchone())
+            db.execute(
+                "INSERT INTO ingestion_sources(user_id, kind, label)"
+                " VALUES (?, 'share_target', 'PWA share target'),"
+                " (?, 'url', 'Paste URL'), (?, 'watch_folder', 'Watch folder')",
+                (uid, uid, uid))
+            log.warning("fresh install: created first owner user %s", uid)
         if row["role"] == "owner" and row["password_hash"]:
             return dict(row)
         pw = secrets.token_urlsafe(10)
