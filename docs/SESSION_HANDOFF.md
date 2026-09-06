@@ -1,15 +1,9 @@
 # Session handoff — Production hardening (Aug 26, 2026, evening)
 
-## v0-core lean rebuild — Phase 1 DONE (Sep 6, 2026)
-What done: git init + branch v0-core + snapshot commit. New lean package
-`v0/` (config/db/media/fetch/main): POST /ingest/upload, POST /ingest/url
-(yt-dlp), ffmpeg → audio.wav 16k mono + frames 1/s. Failures = statuses,
-never crash. Env-driven paths (RV0_DB_PATH/RV0_MEDIA_DIR), no D:/ in v0.
-Check passed: pytest tests_v0 → 3/3 (upload→wav+frames, bad URL→fetch_failed,
-db roundtrip). ffmpeg 8.1.2 on PATH. Deps present: fastapi/uvicorn/yt_dlp/
-multipart/httpx. faster_whisper MISSING (Phase 2 need). Ollama not yet
-installed (Phase 3 need). Next: Phase 2 — Text out (transcribe + OCR +
-hallucination guard) + finish Phase 0 leftovers (_archive kill-list move).
+## v0-core lean rebuild — Phase 1 DONE (Sep 6, 2026) — SUPERSEDED
+Superseded by plan.md merged strategy (keep existing architecture, no
+_archive moves, no Ollama). Orphaned artifacts on branch v0-core: `v0/`,
+`tests_v0/` — cleanup decision pending.
 
 ## Implemented & verified live
 1. **Auth v2** (`app/core/auth.py`, migration v4): password logins
@@ -50,3 +44,22 @@ plaintext+encrypted roundtrip, media mirror incrementality, VAPID gen).
 - For phone push over LAN: must use HTTPS path (self-signed accepted or
   Tailscale). Plain HTTP blocks Web Push by browser design.
 - Dockerfile ready to build once Docker Desktop is installed.
+
+---
+
+Date: 2026-09-06
+Phase: 0 — Verify baseline (per plan.md merged strategy + AGENTS.md v0.1 plan)
+Done:
+- Read plan.md + restored AGENTS.md; lean-rebuild plan rejected, merged strategy adopted.
+- Verified test suite, service health, and Docker status on this machine.
+- Marked lean-rebuild handoff section as superseded; v0/ + tests_v0/ flagged as orphaned artifacts.
+Verification:
+- pytest tests -q --ignore=tests/test_ai_eval.py → 40 passed, 1 pydantic deprecation warning, 4.85s
+- curl http://127.0.0.1:8756/healthz → no response (app not running)
+- curl http://127.0.0.1:8091/v1/models → no response (llama-server not running)
+- wsl docker_build3.log tail → empty, exit 1 (Docker build never ran; Docker not installed — matches Aug 26 note)
+Blockers:
+- None for Phase 1. Services were simply not started at verification time; health claims from Aug 26 could not be re-confirmed live.
+- Tests grew 36 → 40 since Aug 26 — growth unexplained but suite is green.
+Next:
+- Phase 1 — Correctness fixes: evidence quote minimum length, confidence when t_s missing, empty-users bootstrap guard, queue claim heartbeat re-check, focused regression tests for all four.
