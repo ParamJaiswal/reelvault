@@ -1,5 +1,16 @@
 # Session handoff — Production hardening (Aug 26, 2026, evening)
 
+## v0-core lean rebuild — Phase 1 DONE (Sep 6, 2026)
+What done: git init + branch v0-core + snapshot commit. New lean package
+`v0/` (config/db/media/fetch/main): POST /ingest/upload, POST /ingest/url
+(yt-dlp), ffmpeg → audio.wav 16k mono + frames 1/s. Failures = statuses,
+never crash. Env-driven paths (RV0_DB_PATH/RV0_MEDIA_DIR), no D:/ in v0.
+Check passed: pytest tests_v0 → 3/3 (upload→wav+frames, bad URL→fetch_failed,
+db roundtrip). ffmpeg 8.1.2 on PATH. Deps present: fastapi/uvicorn/yt_dlp/
+multipart/httpx. faster_whisper MISSING (Phase 2 need). Ollama not yet
+installed (Phase 3 need). Next: Phase 2 — Text out (transcribe + OCR +
+hallucination guard) + finish Phase 0 leftovers (_archive kill-list move).
+
 ## Implemented & verified live
 1. **Auth v2** (`app/core/auth.py`, migration v4): password logins
    (PBKDF2-240k), HS256 access JWTs (30 min), rotating refresh tokens stored
