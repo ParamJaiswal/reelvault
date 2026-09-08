@@ -241,3 +241,19 @@ Blockers:
 - None.
 Next:
 - Phase 7 leftovers (optional): caption-less URL reels; Phase 6 usage window remains the owner's task (>=20 real reels).
+
+---
+
+Date: 2026-09-08
+Phase: wrap-up — context cache refresh commit + service health check
+Done:
+- Committed pending docs/AGENT_CONTEXT.md refresh (a2dd0ff).
+Verification:
+- git status clean after commit; HEAD v0-core a2dd0ff.
+- GET :8756/healthz -> {"ok":true,"version":"1.1.0"}; GET :8091/v1/models -> qwen2.5-3b-instruct-q4_k_m.gguf listed. Both services up.
+Blockers:
+- None.
+Next:
+- Owner decision: purge test/soak reels (ids 1-50) before real use — asked, no answer yet.
+- Phase 6 is the owner's task (>=20 real reels over ~2 weeks, then docs/V0_RETROSPECTIVE.md).
+- Phase 7 leftover (optional, only on demand): caption-less URL reels.
