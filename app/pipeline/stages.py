@@ -531,11 +531,21 @@ def semantic_duplicate_check(reel_id: int) -> int | None:
     import math
     import struct
     with get_db() as db:
+        reel = db.execute(
+            "SELECT summary, caption FROM reels WHERE id=?", (reel_id,)).fetchone()
         mine = db.execute(
             "SELECT vector FROM embeddings WHERE owner_type='reel' AND reel_id=?",
             (reel_id,)).fetchone()
         if not mine:
             return None
+    # Content-free reels (no speech, no caption, no summary) must not
+    # semantic-merge: identical placeholder summaries produce identical
+    # vectors and chained false duplicates (observed live: 19 testsrc clips
+    # merged into each other; one merged into an unrelated earlier reel).
+    # Hash/shortcode dup checks above already cover byte-identical content.
+    if len((reel["summary"] or "").strip()) < 40:
+        return None
+    with get_db() as db:
         others = db.execute(
             "SELECT e.reel_id, e.vector FROM embeddings e JOIN reels r ON r.id=e.reel_id"
             " WHERE e.owner_type='reel' AND e.reel_id!=? AND r.status='completed'"

@@ -158,3 +158,36 @@ def test_truncated_video_fails_fast(tmp_db):
             (reel_id,)).fetchone()[0]
     assert reel["status"] == "failed"
     assert queued == 0
+
+
+def test_semantic_duplicate_skipped_for_empty_summary(tmp_db, sample_user):
+    """Content-free reels (placeholder summaries from the model) must not
+    semantic-merge — identical placeholder text produced identical vectors
+    and chained false duplicates in the 20-reel soak (reel 14 even merged
+    into an unrelated reel)."""
+    from app.pipeline.stages import semantic_duplicate_check
+    import struct
+
+    def mk(i, summary):
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO reels(user_id, source_kind, status, summary)"
+                " VALUES (?,?,?,?)",
+                (sample_user, "file", "completed", summary))
+            rid = cur.lastrowid
+            vec = struct.pack("<8f", *([0.5] * 8))  # identical vectors
+            db.execute(
+                "INSERT INTO embeddings(owner_type, owner_id, reel_id,"
+                " text_used, dim, vector, model)"
+                " VALUES ('reel', ?, ?, 'x', 8, ?, 'test')",
+                (rid, rid, vec))
+        return rid
+
+    base = mk(0, "A real summary with actual content about pasta recipes.")
+    empty = mk(1, "No summary text provided.")
+    real = mk(2, "A real summary with actual content about pasta recipes.")
+
+    # content-free reel: no semantic merge even with identical vectors
+    assert semantic_duplicate_check(empty) is None
+    # meaningful content still merges (same text -> cos 1.0 > 0.93)
+    assert semantic_duplicate_check(real) == base
