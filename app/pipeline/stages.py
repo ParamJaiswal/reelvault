@@ -20,7 +20,8 @@ from app.knowledge.evidence import (HALLUCINATION_THRESHOLD, SourceSpan,
                                     confidence_score, find_evidence)
 from app.knowledge.schemas import SCHEMA_FIELDS
 from app.pipeline.fetch import FetchError, download_reel
-from app.pipeline.media import (MediaError, extract_audio, ffprobe, make_thumb,
+from app.pipeline.media import (MediaError, PermanentMediaError,
+                                extract_audio, ffprobe, make_thumb,
                                 sample_frames, validate_video)
 
 log = logging.getLogger("rv.pipeline")
@@ -118,7 +119,7 @@ def stage_media(reel_id: int, payload: dict) -> None:
         mp = reel["media_path"]
 
     if not mp or not Path(mp).exists():
-        raise MediaError("No media on disk for media stage")
+        raise PermanentMediaError("No media on disk for media stage")
 
     # Purge artifacts any earlier reel left under this id (fresh DB + shared
     # media dir would otherwise leak old audio/frames into this reel — seen
@@ -196,7 +197,7 @@ def stage_transcribe(reel_id: int, payload: dict) -> None:
         wav = settings.media_dir / "audio" / f"r{reel_id}.wav"
     if not wav.exists():
         ev_local = None
-        raise MediaError("No extracted audio — cannot transcribe")
+        raise PermanentMediaError("No extracted audio — cannot transcribe")
 
     result = providers.get_transcriber().transcribe(str(wav), reel_id=reel_id)
     segs = result.get("segments", [])

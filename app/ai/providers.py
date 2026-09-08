@@ -14,11 +14,12 @@ from __future__ import annotations
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
 
-from app.core.config import settings
+from app.core.config import APP_ROOT, settings
 from app.db.schema import get_db
 
 log = logging.getLogger("rv.ai")
@@ -106,6 +107,7 @@ class WhisperProvider:
         if self._model is None:
             from faster_whisper import WhisperModel
 
+            self._register_cuda_dlls()
             try:
                 self._model = WhisperModel(
                     settings.whisper_model_size,
@@ -119,6 +121,18 @@ class WhisperProvider:
                     settings.whisper_model_size, device="cpu", compute_type="int8"
                 )
         return self._model
+
+    @staticmethod
+    def _register_cuda_dlls() -> None:
+        """ctranslate2 needs cublas64_12/cudart64_12; the bundled llama.cpp
+        dir already ships them. Without this, the CUDA attempt fails AND the
+        in-process cpu retry fails with it (DLL state is process-wide)."""
+        import os
+
+        llamacpp = APP_ROOT / "llamacpp"
+        if llamacpp.is_dir() and any(llamacpp.glob("cublas64_*.dll")):
+            os.add_dll_directory(str(llamacpp))
+            os.environ.setdefault("PATH", f"{llamacpp};{os.environ.get('PATH', '')}")
 
     def transcribe(self, wav_path: str, reel_id: int | None = None) -> dict:
         model = self._load()

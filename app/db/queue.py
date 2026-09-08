@@ -27,6 +27,13 @@ class StageCancelled(Exception):
     dead-lettered quietly instead of retried or treated as a reel error."""
 
 
+class PermanentJobError(Exception):
+    """Deterministic stage failure (missing input, unreadable media):
+    retrying the same job can never succeed, so dead-letter immediately
+    instead of burning the retry ladder (observed: a corrupt file burned
+    3x60s ffprobe timeouts; a never-downloaded URL reel failed 3x)."""
+
+
 STAGES = [
     "ingest",
     "media",
@@ -125,8 +132,14 @@ class Queue:
                 "UPDATE jobs SET status='done', updated_at=? WHERE id=?",
                 (time.time(), job_id))
 
-    def fail(self, job_id: int, error: str) -> str:
-        """Record failure; requeue with backoff or dead-letter."""
+    def fail(self, job_id: int, error: str,
+             permanent: bool = False) -> str:
+        """Record failure; requeue with backoff or dead-letter.
+
+        permanent=True skips the retry ladder: the failure is
+        deterministic, so the job dead-letters on the first attempt
+        (with the usual dead-letter side effects: reel failed, queued
+        downstream jobs deleted)."""
         now = time.time()
         with _q() as conn:
             row = conn.execute(
@@ -135,6 +148,11 @@ class Queue:
             if row is None:
                 return "gone"
             attempts = (row["attempts"] or 0) + 1
+            if permanent and attempts < row["max_attempts"]:
+                # dead-letter now, but record the true attempt count —
+                # inflating it would fake a retry history that never happened
+                row = dict(row)
+                row["max_attempts"] = attempts
             if attempts >= row["max_attempts"]:
                 status = "dead"
                 run_after = now
@@ -152,6 +170,14 @@ class Queue:
             else:
                 status = "queued"
                 run_after = now + settings.retry_backoff_s * (2 ** (attempts - 1))
+                # Downstream stages must not run between this job's retries:
+                # they would fail on missing input and retry-storm alongside
+                # the real failure (observed: transcribe failing repeatedly
+                # while media was still in its backoff window).
+                conn.execute(
+                    "UPDATE jobs SET run_after=MAX(run_after,?), updated_at=?"
+                    " WHERE reel_id=? AND id>? AND status='queued'",
+                    (run_after, now, row["reel_id"], job_id))
             conn.execute(
                 "UPDATE jobs SET status=?, attempts=?, run_after=?, updated_at=?,"
                 " last_error=?, heartbeat=0 WHERE id=?",
@@ -181,6 +207,12 @@ class Queue:
                 self.heartbeat(job["id"])
                 handler(job["reel_id"], payload)
                 self.complete(job["id"])
+            except PermanentJobError as e:
+                # Deterministic failure: skip the retry ladder entirely.
+                log.warning("permanent failure reel=%s stage=%s: %s",
+                            job["reel_id"], job["stage"], str(e)[:150])
+                self.fail(job["id"], f"{type(e).__name__}: {e}",
+                          permanent=True)
             except StageCancelled as e:
                 # Reel already failed upstream; kill this job and anything
                 # still queued behind it. Not a new reel error.

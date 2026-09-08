@@ -14,10 +14,17 @@ from pathlib import Path
 from PIL import Image
 
 from app.core.config import settings
+from app.db.queue import PermanentJobError
 
 
 class MediaError(Exception):
     pass
+
+
+class PermanentMediaError(PermanentJobError, MediaError):
+    """Deterministic media failure (unreadable/corrupt/oversized/missing).
+    Subclasses MediaError so existing ``except MediaError`` handlers keep
+    working, and PermanentJobError so the queue skips the retry ladder."""
 
 
 def ffprobe(path: str) -> dict:
@@ -29,10 +36,15 @@ def ffprobe(path: str) -> dict:
             ],
             capture_output=True, text=True, timeout=60,
         )
+    except subprocess.TimeoutExpired as e:
+        # A file ffprobe cannot parse in 60s will not heal on retry
+        # (observed: garbage upload burned 3x60s in the retry ladder).
+        raise PermanentMediaError(
+            "ffprobe timed out after 60s — file unreadable") from e
     except FileNotFoundError as e:
         raise MediaError("ffprobe not found on PATH") from e
     if out.returncode != 0:
-        raise MediaError(f"ffprobe failed: {out.stderr[:300]}")
+        raise PermanentMediaError(f"ffprobe failed: {out.stderr[:300]}")
     return json.loads(out.stdout or "{}")
 
 
@@ -40,14 +52,15 @@ def validate_video(path: str) -> dict:
     info = ffprobe(path)
     vstreams = [s for s in info.get("streams", []) if s.get("codec_type") == "video"]
     if not vstreams:
-        raise MediaError("No video stream found — file may be corrupt or not a video.")
+        raise PermanentMediaError(
+            "No video stream found — file may be corrupt or not a video.")
     fmt = info.get("format", {})
     dur = float(fmt.get("duration") or vstreams[0].get("duration") or 0)
     if dur <= 0.2:
-        raise MediaError("Video has no playable duration.")
+        raise PermanentMediaError("Video has no playable duration.")
     size_mb = Path(path).stat().st_size / 1e6
     if size_mb > 500:
-        raise MediaError("File larger than 500MB limit.")
+        raise PermanentMediaError("File larger than 500MB limit.")
     return {
         "duration_s": dur,
         "width": int(vstreams[0].get("width") or 0),
