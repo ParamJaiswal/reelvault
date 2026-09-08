@@ -206,3 +206,22 @@ Blockers:
 Next:
 - App restart note: server restarted twice during fix (was running old code); current PID serves fixed code.
 - Remaining Phase 7 scope (optional, next session): caption fetch reliability (yt-dlp caption empty on this reel — OCR carried the content), duplicate ingest UX (retry -> duplicate is correct but user-facing message could say so).
+
+---
+
+Date: 2026-09-07
+Phase: 7 (continued) — pipeline reliability + speed pass
+Done:
+- PermanentJobError (app/db/queue.py): deterministic stage failures (missing media/audio, unreadable/truncated video, oversized file, ffprobe timeout) now dead-letter on attempt 1 with true attempt count recorded, instead of burning the 3x retry ladder. PermanentMediaError subclasses both PermanentJobError and MediaError so existing handlers keep working.
+- Retry-storm guard: on any retryable failure, downstream queued jobs of the same reel are pushed to >= the failed job's next run_after — transcribe can no longer fail repeatedly alongside a still-retrying media stage.
+- faster-whisper activated: WhisperProvider._load registers the bundled llamacpp CUDA DLL dir (cublas64_12 was missing from PATH; the CUDA attempt also poisoned the in-process cpu retry). Bench: transcribe 26.4s -> 15.5s for the 2s bench clip; 15.8s real reel audio 0.3-2.0s warm on RTX 3050.
+- Bench tool: scripts/bench_pipeline.py measures media/transcribe/ocr heavy stages on a synthetic clip (use -X utf8 on Windows console).
+- 5 regression tests in tests/test_reliability.py (permanent deads-once, downstream delay, missing-input permanence, truncated-video fail-fast <15s).
+Verification:
+- pytest tests -q --ignore=tests/test_ai_eval.py -> 75 passed, 1 skipped (70 + 5 new).
+- tests/test_ai_eval.py -> 1 passed (146s live) with faster-whisper active; no metric regression (field recall 0.824, malformed 0.0, unsupported_kept 0.157 vs 0.178 baseline, deadline parse_recall 1.0, 11.7s/reel LLM latency unchanged).
+- Failed-fast check: truncated mp4 -> StageCancelled in <1s (was 3x60s timeout ladder).
+Blockers:
+- None. Note: faster-whisper 'small' model (~480MB) now in HF cache; cublas DLLs resolved from llamacpp/ dir.
+Next:
+- Optional remaining reliability items: caption-less URL reels (OCR carries content), bulk-ingest (20 reels) concurrency soak before Phase 6 window fills.
