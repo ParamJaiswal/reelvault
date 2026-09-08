@@ -257,3 +257,38 @@ Next:
 - Owner decision: purge test/soak reels (ids 1-50) before real use — asked, no answer yet.
 - Phase 6 is the owner's task (>=20 real reels over ~2 weeks, then docs/V0_RETROSPECTIVE.md).
 - Phase 7 leftover (optional, only on demand): caption-less URL reels.
+
+---
+
+Date: 2026-09-08
+Phase: 7 (continued) — backup-restore verification + media-path bug fixes
+Done:
+- Backup restore verified END-TO-END for the first time (AGENTS.md §12): snapshot
+  db_20260908_125723.sqlite + media mirror restored into a clean dir, app booted on
+  :8799 against it -> integrity ok (50 reels / 25 facts / 148 embeddings), owner
+  login OK (auth rows survived), FTS search returned 40 hits with titles/summaries.
+- BUG FOUND + FIXED: reel rows store ABSOLUTE media paths at ingest; after a restore
+  to a different location /media/video + /media/thumb 404 (3 legacy rows already
+  pointed at dead D:\reel-knowledge\...). Fix: resolve_media_path() in
+  app/pipeline/media.py (settings.media_dir + basename fallback), wired into
+  /media/video, /media/thumb, delete purge, stage_ingest, stage_media. No schema change.
+- BUG FOUND + FIXED: backup_db with encrypt=True + empty RV_BACKUP_PASSPHRASE silently
+  wrote PLAINTEXT DB snapshots (5 found in backups/, auth data inside). Now raises;
+  scheduler loop already tolerates the raise. Owner should set RV_BACKUP_PASSPHRASE.
+- ADDED: restore_db() in app/core/backups.py (decrypt + PRAGMA integrity_check into a
+  clean dir, wrong passphrase rejected) — the missing restore path.
+- Test hygiene: test_prod.py leaked settings.media_dir / backup_passphrase globally
+  (same class as the known test_pipeline retry_backoff_s leak).
+Verification:
+- pytest tests -q --ignore=tests/test_ai_eval.py -> 84 passed, 1 skipped (6 new
+  restore-path tests + 2 new backup tests).
+- Live restore re-check with new code: GET /media/video/3 -> 404 before fix,
+  200 (402KB) after; /media/thumb/3 -> 200; search OK; test instance killed, scratch removed.
+Blockers:
+- None. Note: LIVE app on :8756 still runs pre-fix code until next restart.
+Next:
+- Owner: set RV_BACKUP_PASSPHRASE (encrypted backups) and consider purging test/soak
+  reels (ids 1-50) before real use — both still unanswered.
+- Old plaintext snapshots in backups/ contain auth data; owner may delete the ones
+  before 2026-09-08 once a verified encrypted backup exists.
+- Phase 6 remains the owner's task (>=20 real reels, then docs/V0_RETROSPECTIVE.md).

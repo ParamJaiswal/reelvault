@@ -5,20 +5,21 @@ Written after significant state changes. **Freshness rule:** anything here
 older than the last `SESSION_HANDOFF.md` entry must be re-verified before
 being trusted (AGENTS.md source-of-truth rules apply).
 
-**Last updated:** 2026-09-07 (session: bulk-ingest soak + semantic dup fix)
+**Last updated:** 2026-09-08 (session: backup-restore verification + media-path fixes)
 
 ---
 
 ## 1. Snapshot
 
 - Project: ReelVault — local-first reel/video → searchable evidence-backed knowledge base
-- Repo: `D:\reelvault`, branch `v0-core`, tree clean, HEAD `e877429`
-- History (linear): `139b26a` p3 proof → `0ff0088` p4 eval → `7290021` p5 corrections → `b642814` p6 setup → `0619b54` p7 selection → `9adc2bf` p7 URL-ingest fix → `2acf022` reliability+speed → `6cfef0d` soak+dup-guard → `e877429` docs
+- Repo: `D:\reelvault`, branch `v0-core`, tree clean, HEAD `957654d`
+- History (linear): ... → `6cfef0d` soak+dup-guard → `e877429`/`a2dd0ff`/`252569d` docs → `957654d` restore-path fixes
 - Authoritative docs: `AGENTS.md` (policy) · `docs/SESSION_HANDOFF.md` (verified state) · `docs/PHASE_REPORT.md` (phase evidence) · `docs/EVAL.md` (baseline metrics) · `docs/DECISIONS.md` (11 decisions)
 
 ## 2. Verified state (all command-verified, not assumed)
 
-- Tests: **76 passed, 1 skipped** (`pytest tests -q --ignore=tests/test_ai_eval.py`)
+- Tests: **84 passed, 1 skipped** (`pytest tests -q --ignore=tests/test_ai_eval.py`)
+- Backup restore VERIFIED end-to-end (integrity, login, FTS search on restored copy); media-path fix live-proven: /media/video/3 404→200 on restored copy
 - Live eval: **1 passed** (146s, faster-whisper active); field recall 0.824, malformed 0.0, unsupported-kept 0.157, deadline parse 1.0, ~11.7s/reel LLM
 - URL ingest works end-to-end (real reel proven); bulk soak: 20/20 completed, 0 locks, ~9s/reel, worker alive
 - Semantic dup false-merge FIXED: `semantic_duplicate_check` skips summary <40 chars (soak observed 19/20 false merges on content-free clips; was plan.md's flagged 0.93 risk, now measured)
@@ -40,11 +41,14 @@ Phase 6 (usage window open — owner task: 2 weeks, ≥20 real reels, fill `docs
 - ffmpeg `drawtext` access-violates (0xC0000005) under python subprocess on this fontconfig-less setup — use `-vf hue=...` for clip variety instead
 - Windows: bash `&` backgrounding of uvicorn dies — use PowerShell `Start-Process -PassThru`; `grep` tool include_pattern unreliable — use terminal `grep -rn`
 - `backups/` is runtime output, gitignored; `.owner_credentials.txt` in data/ holds owner login (read into scripts, never print)
+- Media paths: DB stores ABSOLUTE paths at ingest; after restore/move they go stale — `resolve_media_path()` (app/pipeline/media.py) resolves via settings.media_dir + basename fallback; used by media endpoints, delete purge, stage_ingest/media
+- Backup policy: `backup_db(encrypt=True)` REFUSES to write plaintext when RV_BACKUP_PASSPHRASE empty (raises); `restore_db()` restores+integrity-checks; scheduler loop tolerates backup raises
 - Orphans removed: `v0/`, `tests_v0/`, `COMPLETION_PLAN.md` (do not resurrect)
 
 ## 5. Pitfalls (tried, failed)
 
 - `confidence_score` 0.665 rounds to 0.66 — don't assert 0.67
+- tests must mutate settings via monkeypatch (test_prod.py media_dir/passphrase leaks fixed; test_pipeline retry_backoff_s leak still known)
 - `jobs.created_at/updated_at/run_after` are NOT NULL — insert them in test fixtures; `embeddings` needs owner_id/text_used/dim/model too
 - `test_pipeline.py` leaks `settings.retry_backoff_s = 0` globally — pin settings with monkeypatch in queue tests
 - StageCancelled vs PermanentJobError: `stage_media` converts permanent media errors to StageCancelled (after marking reel failed) — expect StageCancelled at that boundary
