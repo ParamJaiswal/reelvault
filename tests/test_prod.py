@@ -66,7 +66,7 @@ class TestBackups:
         from app.core import backups as B
         from app.core.config import settings
 
-        settings.backup_passphrase = "test-pass-123"
+        monkeypatch.setattr(settings, "backup_passphrase", "test-pass-123")
         p_plain = B.backup_db(tmp_path, encrypt=False)
         assert p_plain.exists() and p_plain.stat().st_size > 0
         p_enc = B.backup_db(tmp_path, encrypt=True)
@@ -78,14 +78,52 @@ class TestBackups:
         f = Fernet(B._key_from_passphrase("test-pass-123"))
         assert b"SQLite" in f.decrypt(raw)[:16]
 
-    def test_media_mirror_incremental(self, tmp_path):
+    def test_backup_refuses_plaintext_without_passphrase(self, tmp_path, monkeypatch):
+        """encrypt=True + no passphrase must FAIL, not silently write a
+        plaintext DB snapshot (auth/session data) — observed: backups/ held
+        5 plaintext DBs because RV_BACKUP_PASSPHRASE was never set."""
+        import pytest as _pytest
+
+        from app.core import backups as B
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "backup_passphrase", "")
+        with _pytest.raises(RuntimeError, match="PASSPHRASE"):
+            B.backup_db(tmp_path, encrypt=True)
+        assert not list(tmp_path.glob("*.sqlite"))  # nothing written
+
+    def test_restore_db_roundtrip_and_wrong_pass(self, tmp_path, monkeypatch):
+        """restore_db() decrypts into a clean dir, verifies integrity, and
+        rejects a wrong passphrase (the restore path AGENTS.md §12 requires)."""
+        import pytest as _pytest
+
+        from app.core import backups as B
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "backup_passphrase", "right-pass")
+        snap = B.backup_db(tmp_path / "bk", encrypt=True)
+        out = B.restore_db(snap, tmp_path / "restored")
+        assert out.exists()
+        import sqlite3
+
+        c = sqlite3.connect(str(out))
+        assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        c.close()
+        # wrong passphrase must raise, not produce garbage
+        with _pytest.raises(Exception):
+            B.restore_db(snap, tmp_path / "r2", passphrase="wrong")
+        # plaintext snapshots restore too
+        p_plain = B.backup_db(tmp_path / "bk", encrypt=False)
+        assert B.restore_db(p_plain, tmp_path / "r3").exists()
+
+    def test_media_mirror_incremental(self, tmp_path, monkeypatch):
         from app.core import backups as B
         from app.core.config import settings
 
         media = tmp_path / "media"
         media.mkdir(parents=True)
         (media / "a.txt").write_text("v1")
-        settings.media_dir = media
+        monkeypatch.setattr(settings, "media_dir", media)
         c, _ = B.backup_media(tmp_path / "backups")
         assert c == 1                             # one file copied
         # unchanged second run

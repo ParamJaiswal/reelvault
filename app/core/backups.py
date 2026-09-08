@@ -50,10 +50,13 @@ def backup_db(dest_dir: Path, encrypt: bool = False) -> Path:
     if encrypt:
         passphrase = settings.backup_passphrase
         if not passphrase:
-            log.warning("BACKUP_PASSPHRASE not set — writing plaintext DB")
-            out = dest_dir / f"db_{stamp}.sqlite"
-            tmp.replace(out)
-            return out
+            # Failing loudly beats a silent plaintext copy of the DB (which
+            # contains session/auth data) sitting on disk unnoticed.
+            tmp.unlink(missing_ok=True)
+            raise RuntimeError(
+                "BACKUP_PASSPHRASE not set (RV_BACKUP_PASSPHRASE) — "
+                "refusing to write a plaintext DB snapshot; "
+                "set a passphrase or set RV_BACKUP_ENCRYPT=0")
         try:
             from cryptography.fernet import Fernet
 
@@ -99,6 +102,49 @@ def backup_media(dest_root: Path, keep: int = 5) -> tuple[int, int]:
     log.info("media mirror -> %s (copied %d, unchanged %d)", snap.name,
              copied, skipped)
     return copied, skipped
+
+
+def restore_db(src: Path, dest_dir: Path, passphrase: str | None = None) -> Path:
+    """Decrypt (if needed) + verify a DB snapshot into dest_dir.
+
+    AGENTS.md §12: a backup is not "valid" until restored into a clean
+    location and the app can read it. Returns the restored DB path.
+    Raises on a missing/mismatched passphrase or a failed integrity check.
+    """
+    src = Path(src)
+    if not src.exists():
+        raise FileNotFoundError(f"snapshot not found: {src}")
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    out = dest_dir / "reelvault.db"
+    raw = src.read_bytes()
+    if src.suffix == ".enc":
+        if not passphrase:
+            passphrase = settings.backup_passphrase
+        if not passphrase:
+            raise RuntimeError(
+                "snapshot is encrypted — provide the passphrase")
+        from cryptography.fernet import Fernet
+
+        f = Fernet(_key_from_passphrase(passphrase))
+        raw = f.decrypt(raw)  # raises InvalidToken on a wrong passphrase
+    tmp = dest_dir / ".restore_tmp"
+    tmp.write_bytes(raw)
+    import sqlite3
+
+    check = sqlite3.connect(str(tmp))
+    try:
+        result = check.execute("PRAGMA integrity_check").fetchone()[0]
+        n_reels = check.execute("SELECT COUNT(*) FROM reels").fetchone()[0]
+    finally:
+        check.close()
+    if result != "ok":
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"restored DB failed integrity check: {result}")
+    tmp.replace(out)
+    log.info("restored %s -> %s (%d reels, integrity ok)",
+             src.name, out, n_reels)
+    return out
 
 
 def run_backup() -> dict:

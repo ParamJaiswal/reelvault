@@ -25,6 +25,7 @@ from app.ingest.adapters.base import (IngestRequest, parse_shortcode,
 from app.knowledge import assistant as assist
 from app.knowledge.search import hybrid_search, keyword_search
 from app.pipeline import stages as stg
+from app.pipeline.media import resolve_media_path
 from app.ai.providers import get_embedder, get_llm
 
 log = logging.getLogger("rv.api")
@@ -255,9 +256,10 @@ def media_thumb(reel_id: int, token: str = "", uid_ok: int = Depends(require_aut
     with get_db() as db:
         r = db.execute("SELECT thumb_path FROM reels WHERE id=? AND user_id=?",
                        (reel_id, uid_ok)).fetchone()
-    if not r or not r["thumb_path"] or not Path(r["thumb_path"]).exists():
+    thumb = resolve_media_path(r["thumb_path"], "frames") if r else None
+    if thumb is None:
         raise HTTPException(404)
-    return FileResponse(r["thumb_path"])
+    return FileResponse(str(thumb))
 
 
 @app.get("/media/video/{reel_id}")
@@ -265,9 +267,10 @@ def media_video(reel_id: int, uid_ok: int = Depends(require_auth)):
     with get_db() as db:
         r = db.execute("SELECT media_path FROM reels WHERE id=? AND user_id=?",
                        (reel_id, uid_ok)).fetchone()
-    if not r or not r["media_path"] or not Path(r["media_path"]).exists():
+    vp = resolve_media_path(r["media_path"], "video") if r else None
+    if vp is None:
         raise HTTPException(404)
-    return FileResponse(r["media_path"])
+    return FileResponse(str(vp))
 
 
 def reel_card(r) -> dict:
@@ -339,9 +342,9 @@ def delete_reel(reel_id: int, purge_media: bool = True,
                        (reel_id, uid)).fetchone()
         if not r:
             raise HTTPException(404, "Reel not found")
-        media = r["media_path"]
+        media = resolve_media_path(r["media_path"], "video")
         frames_dir = settings.media_dir / "frames" / str(reel_id)
-        thumb = r["thumb_path"]
+        thumb = resolve_media_path(r["thumb_path"], "frames")
         db.execute("DELETE FROM embeddings WHERE reel_id=?", (reel_id,))
         db.execute("DELETE FROM reels WHERE id=?", (reel_id,))
     if purge_media:

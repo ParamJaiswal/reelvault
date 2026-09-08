@@ -21,6 +21,7 @@ from app.knowledge.evidence import (HALLUCINATION_THRESHOLD, SourceSpan,
 from app.knowledge.schemas import SCHEMA_FIELDS
 from app.pipeline.fetch import FetchError, download_reel
 from app.pipeline.media import (MediaError, PermanentMediaError,
+                                resolve_media_path,
                                 extract_audio, ffprobe, make_thumb,
                                 sample_frames, validate_video)
 
@@ -58,7 +59,8 @@ def stage_ingest(reel_id: int, payload: dict) -> None:
         reel = get_reel(db, reel_id)
         set_reel(db, reel_id, status="processing", current_stage="ingest", progress=0.05)
 
-    if reel["media_path"] and Path(reel["media_path"]).exists():
+    reel_path = resolve_media_path(reel["media_path"], "video")
+    if reel_path is not None:
         with get_db() as db:
             ev(db, reel_id, "ingest", "local file present; skipping download")
         return
@@ -116,9 +118,9 @@ def stage_media(reel_id: int, payload: dict) -> None:
     with get_db() as db:
         reel = get_reel(db, reel_id)
         set_reel(db, reel_id, current_stage="media", progress=0.15)
-        mp = reel["media_path"]
+        mp = resolve_media_path(reel["media_path"], "video")
 
-    if not mp or not Path(mp).exists():
+    if mp is None:
         raise PermanentMediaError("No media on disk for media stage")
 
     # Purge artifacts any earlier reel left under this id (fresh DB + shared
@@ -132,12 +134,12 @@ def stage_media(reel_id: int, payload: dict) -> None:
         shutil.rmtree(stale_dir, ignore_errors=True)
 
     try:
-        info = validate_video(mp)
+        info = validate_video(str(mp))
         wav = settings.media_dir / "audio" / f"r{reel_id}.wav"
         thumb = settings.media_dir / "frames" / f"thumb_r{reel_id}.jpg"
-        extract_audio(mp, str(wav))
-        make_thumb(mp, str(thumb))
-        frames = sample_frames(mp, reel_id, info["duration_s"])
+        extract_audio(str(mp), str(wav))
+        make_thumb(str(mp), str(thumb))
+        frames = sample_frames(str(mp), reel_id, info["duration_s"])
     except MediaError as e:
         # Corrupt/unprocessable media is fatal, not transient: fail the reel
         # NOW so downstream stages cancel via the guard instead of running
@@ -153,7 +155,7 @@ def stage_media(reel_id: int, payload: dict) -> None:
 
     content_hash = None
     try:
-        content_hash = sha_of_file(mp)[:16] + f":{int(info['duration_s'])}"
+        content_hash = sha_of_file(str(mp))[:16] + f":{int(info['duration_s'])}"
     except Exception:
         pass
 

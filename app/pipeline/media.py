@@ -27,6 +27,34 @@ class PermanentMediaError(PermanentJobError, MediaError):
     working, and PermanentJobError so the queue skips the retry ladder."""
 
 
+def resolve_media_path(stored: str | None, sub: str | None = None) -> Path | None:
+    """Resolve a DB-stored media path against the CURRENT settings.
+
+    Reel rows store absolute paths at ingest time. After a backup restore
+    (or a media-dir move) those absolutes are stale, so fall back to the
+    same basename under settings.media_dir before giving up. Returns a
+    live Path or None when the artifact is genuinely gone.
+    """
+    if not stored:
+        return None
+    p = Path(stored)
+    if not p.is_absolute():
+        # relative rows resolve against the configured media dir, with CWD
+        # as a compatibility fallback (older rows/tests stored CWD-relative
+        # paths like media/video/x.mp4)
+        p = settings.media_dir / p
+        if not p.exists() and (Path.cwd() / stored).exists():
+            return Path.cwd() / stored
+    if p.exists():
+        return p
+    name = Path(stored).name
+    for cand in ((settings.media_dir / name),
+                 (settings.media_dir / sub / name) if sub else None):
+        if cand is not None and cand.exists():
+            return cand
+    return None
+
+
 def ffprobe(path: str) -> dict:
     try:
         out = subprocess.run(
