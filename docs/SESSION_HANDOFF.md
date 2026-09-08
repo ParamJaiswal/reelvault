@@ -225,3 +225,19 @@ Blockers:
 - None. Note: faster-whisper 'small' model (~480MB) now in HF cache; cublas DLLs resolved from llamacpp/ dir.
 Next:
 - Optional remaining reliability items: caption-less URL reels (OCR carries content), bulk-ingest (20 reels) concurrency soak before Phase 6 window fills.
+
+---
+
+Date: 2026-09-07
+Phase: 7 (continued) — bulk-ingest soak (PASS) + semantic dup false-merge fix
+Done:
+- scripts/soak_bulk_ingest.py: N distinct synthetic clips -> concurrent upload -> queue drain report. Run 1 (identical-looking testsrc clips): 20/20 terminal, worker alive, 0 stuck, ~12s/reel — but 19/20 false 'duplicate' from semantic_duplicate_check: identical placeholder summaries ("No summary text provided." — invented by Qwen for content-free input) -> identical embeddings -> cos>0.93 chain; reel 14 even merged into unrelated reel 4. This was plan.md's flagged 0.93 over-merge risk, now measured live.
+- Fix: semantic_duplicate_check skips reels whose summary is <40 chars (content-free); hash/shortcode paths unchanged. Regression test in tests/test_reliability.py.
+- Run 2 (hue-shifted distinct clips, fixed code): 20/20 completed, 0 duplicates, 0 dead jobs, 0 'database is locked', worker alive, ~9s/reel wall.
+Verification:
+- pytest tests -q --ignore=tests/test_ai_eval.py -> 76 passed, 1 skipped.
+- Soak runs recorded above (live app on :8756, llama-server up).
+Blockers:
+- None.
+Next:
+- Phase 7 leftovers (optional): caption-less URL reels; Phase 6 usage window remains the owner's task (>=20 real reels).
