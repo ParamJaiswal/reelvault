@@ -438,3 +438,30 @@ Blockers:
 Next:
 - Owner supplies remaining URLs/uploads toward >=20 reels; then fill docs/V0_RETROSPECTIVE.md.
 - Candidate scoped fix session (needs owner approval + golden eval gate): (a) t_s propagation to facts for click-to-seek, (b) B4 verbatim date_text deadline prompt fix.
+
+---
+
+Date: 2026-09-09
+Phase: 6 (personal-use validation) — batch 2: 9 more reels (13-21)
+
+Done:
+- 9 owner URLs submitted and processed: 9/9 completed, 0 failed. Worker healthy.
+- 34 facts kept; 34/34 (100%) evidence-backed quotes. conf range 0.35-0.91.
+- Phase 6 reel-count target REACHED: 21 real reels processed (>= 20).
+- Search verified on new content: "Microsoft Azure Principal", "Claude certifications", "free experiences Bangalore" all hit correct reels.
+- Extraction quality: strong on tutorial/product/job content (reels 14, 16, 18, 19: 3-8 facts each, correct categories incl. Job, AI/ML, Startup, News).
+- Reel 21: 0 facts (conf 0.35, hiring-tips talking-head reel) - general-advice reels produce few evidence-backed facts; acceptable v0.1 behavior.
+
+Persistent gaps (unchanged, logged for retrospective / fix session):
+- 0/50+34 facts carry timestamps (t_s) -> click-to-seek unavailable everywhere.
+- 0 deadlines detected across 21 reels (batch 2 had no explicit deadline reels; reel 12 in batch 1 remains the confirmed B1/B4 miss).
+
+Verification:
+- Poll loop: 9/9 completed; POST /api/search hits above; no code changes this session.
+
+Blockers:
+- None.
+
+Next:
+- Continue 2-week usage window (owner keeps importing as reels surface) and/or draft docs/V0_RETROSPECTIVE.md - 20-reel threshold met; answer the 5 Phase 6 questions from observed data.
+- Scoped fix candidates remain: t_s propagation for click-to-seek; B4 verbatim date_text deadline prompt (golden-eval gated).
