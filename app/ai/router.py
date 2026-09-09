@@ -234,14 +234,40 @@ class TaskRouter:
                 ' "entities": [{"name": "...", "kind": '
                 '"company|tool|person|skill|location"}]}\n'
                 "If a field isn't mentioned, omit it. Never invent URLs, "
-                "salaries or dates.")
+                "salaries or dates.\n"
+                "Date-like fields (deadline, due, date): the value MUST be "
+                "the verbatim date words from the source (e.g. "
+                '"September 15"), never a normalized date like '
+                '"2026-09-15" - the app parses dates itself.\n'
+                "Example (format only; use the fields listed above):\n"
+                "TRANSCRIPT: [00:00] Zylker is hiring data analysts in "
+                "Bangalore, 0-2 yrs experience. Apply by September 15.\n"
+                'ANSWER: {"summary": "Zylker hiring data analysts in '
+                'Bangalore, apply by September 15", "key_takeaways": '
+                '["0-2 yrs experience required"], "action_items": '
+                '["Apply by September 15"], "categories": ["Job"], '
+                '"facts": ['
+                '{"field": "company", "value": "Zylker", "quote": '
+                '"Zylker is hiring data analysts"}, '
+                '{"field": "location", "value": "Bangalore", "quote": '
+                '"data analysts in Bangalore"}, '
+                '{"field": "experience_required", "value": "0-2 yrs", '
+                '"quote": "0-2 yrs experience"}, '
+                '{"field": "deadline", "value": "September 15", "quote": '
+                '"Apply by September 15"}], '
+                '"entities": [{"name": "Zylker", "kind": "company"}]}'
+            )
         else:
             sys_p = (
                 'Summarize this Instagram Reel into knowledge. Return ONLY JSON:'
                 ' {"summary": "...", "key_takeaways": ["..."],'
                 ' "action_items": ["..."], "categories": ["..."],'
                 ' "facts": [{"field":"...","value":"...","quote":"..."}],'
-                ' "entities": [{"name": "...", "kind": "..."}]}')
+                ' "entities": [{"name": "...", "kind": "..."}]}\n'
+                "Date-like fact values (deadline, due, date) MUST be the "
+                'verbatim date words from the source (e.g. "September 15"), '
+                'never a normalized date like "2026-09-15" - the app parses '
+                "dates itself.")
         raw = llm.chat(
             [{"role": "system", "content": sys_p},
              {"role": "user", "content": unified_text[:7000]}],

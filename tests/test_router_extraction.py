@@ -59,3 +59,47 @@ def _extraction_system_prompt(captured_llm, schema_type="job"):
 
     get_router().extract("transcript text", schema_type)
     return captured_llm.calls[0]["messages"][0]["content"]
+
+
+# --------------------------------------------- B1: compact few-shot example
+def test_job_extraction_prompt_has_one_compact_example(captured_llm):
+    prompt = _extraction_system_prompt(captured_llm, "job")
+    assert prompt.count("ANSWER: {") == 1
+    assert "TRANSCRIPT: [00:00] Zylker is hiring data analysts" in prompt
+    for field in ("company", "location", "experience_required", "deadline"):
+        assert f'"field": "{field}"' in prompt
+    # measured 1808 chars when the example landed; bound keeps it compact
+    assert len(prompt) < 2500
+
+
+def test_extraction_example_matches_schema_validators(captured_llm):
+    """The few-shot ANSWER must pass the same validators real extraction
+    output goes through, and its quotes must be verbatim source text so the
+    example itself models the evidence rules."""
+    from app.knowledge.schemas import BaseExtraction, JobFacts
+
+    prompt = _extraction_system_prompt(captured_llm, "job")
+    obj = json.loads(prompt.split("ANSWER: ", 1)[1])
+    parsed = BaseExtraction.model_validate(obj)
+    assert len(parsed.facts) == 4
+    assert {f.field for f in parsed.facts} <= set(JobFacts.model_fields)
+    transcript = prompt.split("TRANSCRIPT: ", 1)[1].split("\n", 1)[0]
+    for fact in obj["facts"]:
+        assert fact["quote"] in transcript, fact["field"]
+
+
+# ----------------------------------------- B4: verbatim date words in prompt
+def test_job_extraction_prompt_requires_verbatim_dates(captured_llm):
+    prompt = _extraction_system_prompt(captured_llm, "job")
+    assert "verbatim date words" in prompt
+    assert "never a normalized date" in prompt
+    obj = json.loads(prompt.split("ANSWER: ", 1)[1])
+    deadline = next(f for f in obj["facts"] if f["field"] == "deadline")
+    assert deadline["value"] == "September 15"  # verbatim, not 2026-09-15
+
+
+def test_generic_extraction_prompt_requires_verbatim_dates(captured_llm):
+    prompt = _extraction_system_prompt(captured_llm, "generic")
+    assert "verbatim date words" in prompt
+    assert "never a normalized date" in prompt
+    assert len(prompt) < 1200
