@@ -126,20 +126,39 @@ def extract_deadline_candidates(text: str) -> list[str]:
 
 def best_deadline(facts: list[dict], unified_text: str,
                   today: datetime | None = None) -> Deadline | None:
-    """Pick the highest-confidence parseable deadline among facts + text."""
+    """Pick the highest-confidence parseable deadline among facts + text.
+
+    A date parseable from the evidence quote is fully trusted and keeps
+    the normal parse confidence (boosted by the fact's own confidence).
+    B4: when the quote yields no date but the fact's normalized value
+    does, the value is parsed anyway at reduced confidence (0.5) instead
+    of being dropped.
+    """
     best: Deadline | None = None
+
+    def consider(d: Deadline) -> None:
+        nonlocal best
+        if d.date and (best is None or d.confidence > best.confidence):
+            best = d
+
     for f in facts or []:
         field = (f.get("field") or "").lower()
         val = f.get("value") or ""
         if ("deadline" in field or "due" in field) and val:
-            d = parse_deadline(val, today=today,
-                               source=f.get("evidence_source", "transcript"))
-            d.confidence = max(d.confidence, f.get("confidence", 0.5))
-            if d.date and (best is None or d.confidence > best.confidence):
-                best = d
+            source = f.get("evidence_source", "transcript")
+            quote = (f.get("evidence_quote") or f.get("quote") or "").strip()
+            if quote:
+                d = parse_deadline(quote, today=today, source=source)
+                if d.date:
+                    d.confidence = max(d.confidence,
+                                       f.get("confidence", 0.5))
+                    consider(d)
+                    continue
+            d = parse_deadline(val, today=today, source=source)
+            if d.date:
+                d.confidence = 0.5   # value-only parse: not corroborated
+                consider(d)
     if best is None:
         for cand in extract_deadline_candidates(unified_text or ""):
-            d = parse_deadline(cand, today=today, source="rules")
-            if d.date and (best is None or d.confidence > best.confidence):
-                best = d
+            consider(parse_deadline(cand, today=today, source="rules"))
     return best
