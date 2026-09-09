@@ -43,13 +43,18 @@ def test_iso_date_invalid_components_fall_through():
 
 
 def test_iso_date_embedded_in_sentence():
-    # not strict ISO -> dateutil fuzzy path applies; with dayfirst=True the
-    # known quirk flips 2026-10-01 to Jan 10 (both 10 and 1 valid components)
-    # and then rolls the past date to 2027 — documented pre-existing behavior
-    # of the fuzzy path, out of scope for the ISO fast-path fix
+    # embedded ISO is unambiguous — must parse as October 1, not dayfirst-
+    # flipped to Jan 10 (the quirk that motivated the ISO fast-path)
     d = parse_deadline("apply by 2026-10-01", today=TODAY)
     assert d.date is not None
-    assert d.date.year in (2026, 2027)  # quirk may year-roll; never crashes
+    assert (d.date.year, d.date.month, d.date.day) == (2026, 10, 1)
+    assert d.confidence >= 0.8
+
+
+def test_ambiguous_slash_dates_keep_dayfirst_policy():
+    # genuinely ambiguous D/M strings keep the project's dayfirst choice
+    d = parse_deadline("15/09/2026", today=TODAY)
+    assert (d.date.month, d.date.day) == (9, 15)
 
 
 def test_month_name_with_day():

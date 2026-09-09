@@ -48,10 +48,11 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
     dt: datetime | None = None
     conf = 0.5
 
-    # 0) strict ISO YYYY-MM-DD — dateutil's dayfirst flips these when both
-    #    trailing numbers are valid months (2026-06-01 parsed as Jan 6),
-    #    so handle the unambiguous format directly
-    m_iso = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", raw)
+    # 0) ISO YYYY-MM-DD anywhere in the string — dateutil's dayfirst flips
+    #    these when both trailing numbers are valid months (2026-06-01
+    #    parsed as Jan 6, "apply by 2026-10-01" as Jan 10), so handle the
+    #    unambiguous format directly, embedded or standalone
+    m_iso = re.search(r"(\d{4})-(\d{2})-(\d{2})", raw)
     if m_iso:
         try:
             dt = datetime(int(m_iso.group(1)), int(m_iso.group(2)),
