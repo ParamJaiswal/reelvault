@@ -367,7 +367,8 @@ Verification:
 Blockers:
 - None.
 Next:
-- DONE 2026-09-08 (9f9a808): parse_deadline ISO fast-path — agent3's xfail bug fixed + 3 regression tests (ambiguous-components, invalid-ISO fallthrough, embedded-ISO). Eval re-run: parse_recall 1.0, recall 0.765 (noise range 0.765-0.824), unsupported 0.146, all gates pass.
+- DONE 2026-09-09 (runbook executed): worktrees+agent branches removed (tag pre-parallel-work kept); RV_BACKUP_PASSPHRASE generated (random, stored in data/.backup_passphrase.txt + .env, both gitignored, never printed); app restarted on :8756 with full new code (pid 32452); suite 154+1; eval gates pass (recall 0.824, unsupported 0.128, parse 1.0); ALL 50 test/soak reels purged via API (DB empty); FIRST ENCRYPTED BACKUP taken (db_20260909_113849.sqlite.enc, 123 media files) and RESTORE-VERIFIED (integrity ok, 0 reels post-purge, 2 users); all old plaintext *.sqlite snapshots deleted.
+- Phase 6 is NOW LIVE: owner imports >=20 real reels over ~2 weeks, then docs/V0_RETROSPECTIVE.md. Watch during window: unsupported-kept rate on real content, A3 confidence lift on caption-only reels, llm_max_tokens truncation (dense reels), extract() malformed-JSON rate (decide on retry).
 - Coordinator decisions: extract() one-retry (AGENTS.md permits), llm_max_tokens bump for dense reels (measure truncation rate first), Pillow getdata() deprecation in phash().
 - Worktree cleanup available: git worktree remove .worktrees/{agent1-router,
   agent2-evidence,agent3-tests,agent4-pipeline} + branch deletion after owner
