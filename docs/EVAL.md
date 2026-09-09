@@ -110,6 +110,32 @@ Real-item signals driving hardening candidates:
    real deadline cases were hallucination artifacts, so no real
    deadline-bearing golden item exists yet. Owner should supply one.
 
+## Run — September 9, 2026 (PHASE 7 step 4: anti-padding extraction prompt)
+
+Change: schema-branch extraction prompt gains "NEVER PAD" instruction —
+values must be actually stated in the source, no quote reuse across facts,
+an invented field is worse than a missing one. Target: fact inflation on
+tiny content (job-03 baseline: 12 kept / 9 unsupported from one OCR
+sentence). Two post-change runs; gates 1 passed both.
+
+| Metric | Baseline (16) | Run A | Run B |
+|---|---|---|---|
+| Golden field recall | 0.762 | **0.857** | **0.810** |
+| Unsupported-kept rate | 0.161 | **0.141** | **0.129** |
+| Deadline parse recall | 0.750 | 1.000 | 1.000 |
+| Min-facts-kept rate | 0.938 | 0.938 | 0.938 |
+| Multilabel accuracy | 0.781 | 0.781 | 0.781 |
+| Malformed-JSON rate | 0.000 | 0.000 | 0.000 |
+
+job-03 per-case: 12 kept / 9 unsup → 5 kept / 1 unsup → 3 kept / 0 unsup
+(fields 2/2 in all three; model now declines to pad unsupported fields and
+the ledger sheds the rest). edu-04 kept=1 (anchored, min=0 OK). No gated
+regression; both target metrics improved on both runs.
+
+Remaining Phase 7 targets (measured, not yet addressed): edu-05
+field-recall misses (topic/technologies 0/2 across all runs — how-to content
+does not fill education fields); job-03 schema drift (education vs job).
+
 ## Run — September 9, 2026 (PHASE 7 baseline: golden set expanded to 16 items)
 
 Phase 7 step 1-2: added 3 real-window items labeled from stored Phase 6

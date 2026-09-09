@@ -583,3 +583,34 @@ Next:
   fact inflation on tiny content (per-field fact cap or span-diversity rule
   in extraction prompt; must re-run 16-item eval before/after), then edu-05
   topic/technologies probe follow-up.
+
+---
+
+Date: 2026-09-09
+Phase: 7 step 4 (partial) — anti-padding prompt fix landed, eval-gated
+
+Done:
+- Fact-inflation fix: schema-branch extraction prompt gains "NEVER PAD"
+  instruction (values must be stated in source; no quote reuse; invented
+  field worse than missing).
+- Two post-change eval runs, both improve target metrics vs 16-item baseline:
+  field recall 0.762 -> 0.857 / 0.810; unsupported-kept 0.161 -> 0.141 /
+  0.129; parse_recall 0.75 -> 1.0 / 1.0; no gated regression (min-kept
+  0.938, multilabel 0.781, malformed 0.0 unchanged).
+- job-03 per-case: 12 kept / 9 unsup -> 5/1 -> 3/0 (fields 2/2 throughout).
+  Inflation eliminated.
+- EVAL.md updated with the step-4 run table.
+
+Verification:
+- Eval gates 1 passed on both runs (16-item set, llama-server up).
+- Note: both services were found down this session (machine restart?);
+  llama-server + app restarted via established Start-Process pattern.
+
+Blockers:
+- None.
+
+Next:
+- Remaining Phase 7 measured targets: (a) edu-05 field misses (topic/
+  technologies 0/2 stable across runs - how-to content doesn't fill
+  education fields), (b) job-03 schema drift (education vs job). Both need
+  eval-gated changes; do (a) or (b) next session, one at a time.
