@@ -27,19 +27,22 @@ usage, not architecture preference.
 
 | Metric | How to measure | Value at end |
 |---|---|---|
-| Real reels processed | completed reels added from real usage | |
-| Search hits that recovered real content | each time search found something you needed | |
-| Search misses on content you knew existed | note each miss | |
-| Evidence quotes inspected before trusting a fact | manual count | |
-| Facts corrected or deleted | `user_corrected=1` count + deletions | |
-| Upload vs URL ingestion split | reels imported by file vs URL | |
-| Top 3 recurring failures | failure log below | |
-| Honest time saved vs scrolling saved content | weekly estimate | |
+| Real reels processed | completed reels added from real usage | 21 (as of 2026-09-09, day 3 of window) |
+| Search hits that recovered real content | each time search found something you needed | 7/7 agent-verified queries hit (batch 1+2); owner-driven count pending |
+| Search misses on content you knew existed | note each miss | 0 so far |
+| Evidence quotes inspected before trusting a fact | manual count | pending owner usage |
+| Facts corrected or deleted | `user_corrected=1` count + deletions | 1 (pre-window baseline); pending |
+| Upload vs URL ingestion split | reels imported by file vs URL | 0 upload / 21 URL |
+| Top 3 recurring failures | failure log below | see log: no timestamps, deadline miss, zero-fact reels |
+| Honest time saved vs scrolling saved content | weekly estimate | pending (min. 1 more week) |
 
 ## Failure log (append as they happen)
 
 | Date | Reel | What failed | Detail |
 |---|---|---|---|
+| 2026-09-09 | 12 | Deadline not extracted | Summary says "apply by September 15"; 0 facts, 0 deadlines produced (B1/B4 recall gap) |
+| 2026-09-09 | 1-21 (all) | No fact timestamps | 0/84 facts carry t_s; click-to-seek unusable |
+| 2026-09-09 | 21 | Zero facts despite content | Hiring-tips talking-head reel: 0 facts, conf 0.35; also reel 12 miscategorized (Tutorial/Product, is job content) |
 
 ## Phase 6 deliverable questions (answer at the end)
 
@@ -48,6 +51,11 @@ usage, not architecture preference.
 3. Was upload or URL ingestion the practical path?
 4. What failed most often?
 5. What single next feature would save the most time?
+
+**Interim signals (day 3, 21 reels — NOT final answers):**
+- 84/84 facts carry verbatim quotes; URL ingestion 21/21 success (single day, small sample).
+- Worker/pipeline: 0 failures, 0 stuck jobs across both batches.
+- Dominant quality gap: timestamps absent everywhere; deadline extraction missed on the one clear deadline reel.
 
 ## Decision at the end
 
