@@ -465,3 +465,28 @@ Blockers:
 Next:
 - Continue 2-week usage window (owner keeps importing as reels surface) and/or draft docs/V0_RETROSPECTIVE.md - 20-reel threshold met; answer the 5 Phase 6 questions from observed data.
 - Scoped fix candidates remain: t_s propagation for click-to-seek; B4 verbatim date_text deadline prompt (golden-eval gated).
+
+---
+
+Date: 2026-09-09
+Phase: 6 support — fix session: short-value evidence rescue + prompt example-leak fix
+
+Done:
+- Root-caused reel 12 "0 facts despite deadline in summary": NOT an evidence-matcher bug alone. Two defects found.
+  (a) evidence.py find_evidence: when both quote and value are < MIN_QUOTE_CHARS (15), it returned 0.0 before the designed value-in-span weak-support path (0.75) could fire — short factual values (Zylker, Bangalore, September 15) were auto-dropped even when verbatim in source. FIXED: short-value rescue via whole-phrase token containment, similarity capped at 0.75, MIN_VALUE_CHARS=6 floor ("AI" still dropped).
+  (b) router.py extract prompt: the B1 few-shot example (a Zylker hiring reel) was parroted verbatim by Qwen on low-signal content — model emitted the example's summary + 4 facts regardless of actual reel content; evidence ledger correctly dropped the facts but the summary leak persisted. FIXED: explicit FORMAT-ONLY anti-copy instruction naming the example values; generic path gained verbatim-value rule.
+- Correction to batch 1/2 reports: "0/84 facts carry timestamps" was a measurement error (script used nonexistent field 't_s'; real field is evidence_t_s). DB truth: 63/84 facts have timestamps (OCR 22/22, transcript 41/46, caption 0/16). Click-to-seek data was always present; V0_RETROSPECTIVE failure log row corrected accordingly.
+- Live proof: reel 22 (DcgcqXfSVrI) delete + reprocess with fixes: summary now correct (LinkedIn networking playbook, no Zylker leak), 0 facts -> 4 kept, all source-anchored with t_s + quotes, conf 0.7.
+
+Verification:
+- New tests tests/test_evidence_rescue.py (8): all pass; existing phase1/evidence/units tests unchanged (43 focused green).
+- Full suite: 163 passed, 1 skipped (one transient ordering flake in 2 pre-existing tests re-ran green; unrelated to changes).
+- Golden eval (2 pre-change runs for noise band, 1 post-change): field recall 0.824 -> 0.882 (improved), malformed 0.0, unsupported-kept 0.085 (in band), multilabel 0.769 (unchanged), parse_recall 0.75 (n=4 noise, pre-change swing documented). Gates: 1 passed.
+- EVAL.md updated with the September 9 run entry.
+
+Blockers:
+- None.
+
+Next:
+- Correct the retrospective failure-log row for timestamps (0/84 -> 63/84, caption facts legitimately untimed) - done in same commit.
+- Owner continues Phase 6 imports; B4-style prompt refinement for deadline recall can be evaluated against the new 0.882 recall baseline.

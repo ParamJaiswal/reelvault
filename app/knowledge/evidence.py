@@ -124,6 +124,45 @@ def _sim(a: str, b: str) -> float:
 
 
 MIN_QUOTE_CHARS = 15  # shorter normalized text can't be verified reliably
+MIN_VALUE_CHARS = 6   # short-value rescue floor: "Zylker" qualifies, "AI" does not
+
+
+def _phrase_in_tokens(hay: list[str], needle: list[str]) -> bool:
+    """Whole-phrase token containment: ["partial"] must not match inside
+    ["partnership"], unlike plain substring `in`."""
+    m = len(needle)
+    if m == 0 or m > len(hay):
+        return False
+    first = needle[0]
+    for i in range(len(hay) - m + 1):
+        if hay[i] == first and hay[i:i + m] == needle:
+            return True
+    return False
+
+
+def _short_value_match(value_norm: str,
+                       spans: list[SourceSpan]) -> EvidenceMatch | None:
+    """Rescue path for short factual values (both quote and value are under
+    MIN_QUOTE_CHARS). A value verbatim in a span is designed weak support
+    (0.75, never 1.0), so short claims like company names or dates are not
+    auto-dropped despite being present in the source. Without this, reel 12
+    lost 'Zylker', 'Bangalore', '0-2 yrs', 'September 15' — all in source."""
+    vt = value_norm.split()
+    if not vt or len(value_norm) < MIN_VALUE_CHARS:
+        return None
+    best: SourceSpan | None = None
+    agree = 0
+    for sp in spans:
+        if _phrase_in_tokens(norm(sp.text).split(), vt):
+            agree += 1
+            # prefer a timestamped span so click-to-seek works, then longer text
+            if best is None or (sp.t_s is not None
+                                and (best.t_s is None
+                                     or len(sp.text) > len(best.text))):
+                best = sp
+    if best is None:
+        return None
+    return EvidenceMatch(similarity=0.75, span=best, n_sources_agreeing=agree)
 
 
 def find_evidence(quote: str, value: str, spans: list[SourceSpan]) -> EvidenceMatch:
@@ -133,8 +172,12 @@ def find_evidence(quote: str, value: str, spans: list[SourceSpan]) -> EvidenceMa
     probe = qn if len(qn) >= len(vn) else vn
     alt = vn if probe == qn else qn
     if len(probe) < MIN_QUOTE_CHARS:
-        # A one-word quote would otherwise ride the `a in b` shortcut
-        # straight to a 1.0 similarity and slip past the drop threshold.
+        # Phase-1 floor: a one-word quote must never ride the `a in b`
+        # shortcut to 1.0. But a short factual VALUE verbatim in a span is
+        # still designed weak support (0.75) — rescue it instead of dropping.
+        rescued = _short_value_match(vn, spans)
+        if rescued is not None:
+            return rescued
         return EvidenceMatch(similarity=0.0, span=None, n_sources_agreeing=0)
     best_span, best = None, 0.0
     agree = 0

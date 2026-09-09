@@ -228,6 +228,11 @@ class TaskRouter:
                 "field with no support in the source is simply omitted.\n"
                 "CRITICAL: every non-empty value MUST be supported by a "
                 "verbatim quote from the source.\n"
+                "IMPORTANT: the example below shows FORMAT ONLY. Never copy "
+                "its values (Zylker, Bangalore, September 15, 0-2 yrs) into "
+                "your answer - extract only values that appear verbatim in "
+                "the actual source text of THIS reel. Values not present in "
+                "the source are discarded as hallucinations.\n"
                 'Return ONLY JSON: {"summary": "...", "key_takeaways": ["..."],'
                 ' "action_items": ["..."], "categories": ["..."],'
                 ' "facts": [{"field": "...", "value": "...", "quote": "..."}],'
@@ -267,7 +272,10 @@ class TaskRouter:
                 "Date-like fact values (deadline, due, date) MUST be the "
                 'verbatim date words from the source (e.g. "September 15"), '
                 'never a normalized date like "2026-09-15" - the app parses '
-                "dates itself.")
+                "dates itself.\n"
+                "Every fact value MUST appear verbatim in the source text; "
+                "values not present in the source are discarded as "
+                "hallucinations.")
         raw = llm.chat(
             [{"role": "system", "content": sys_p},
              {"role": "user", "content": unified_text[:7000]}],

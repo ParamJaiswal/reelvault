@@ -70,6 +70,40 @@ drivers). finance-01 now routes schema education/generic (B3 fix visible).
 Agent 2's A3 raises the no-timestamp confidence ceiling 0.75→0.99 — flagged
 for observation during Phase 6 real-data use.
 
+## Run — September 9, 2026 (short-value rescue + anti-leak prompt guard)
+
+Changes under test:
+1. `evidence.py` — short-value rescue: when BOTH quote and value are under
+   `MIN_QUOTE_CHARS`, `find_evidence` previously returned 0.0 immediately,
+   making the designed value-in-span weak support (0.75) unreachable. Now a
+   value ≥ 6 chars appearing as a whole phrase in a span rescues the fact at
+   similarity 0.75 (never 1.0 — the Phase-1 floor intent is preserved).
+   Found via reel 12/22 root-cause work (though its real cause was #2).
+2. `router.py` — anti-leak instruction on the extraction prompt: the B1
+   few-shot example (a Zylker hiring reel) was being parroted verbatim by the
+   3B model on low-signal content — same summary + 4 fabricated facts, all
+   correctly dropped by the evidence ledger, but the summary leak persisted
+   (summaries are not evidence-checked). Example now explicitly marked
+   FORMAT-ONLY with named values not to copy; generic path gained the
+   verbatim-value rule.
+
+Live proof (reel 22 = DcgcqXfSVrI, delete + reprocess): summary fixed from
+the parroted "Zylker is hiring data analysts in Bangalore, apply by September
+15" to the true content (LinkedIn networking playbook); 0 facts → 4 kept,
+all source-anchored with t_s and quotes, conf 0.7.
+
+| Metric | This run | Sept 8 final | Gate |
+|---|---|---|---|
+| Category multilabel accuracy (`primary`) | 0.769 | 0.769 | ≥ 0.60 ✅ |
+| Golden field recall | **0.882** | 0.824 | ≥ 0.50 ✅ (improved) |
+| Malformed-JSON rate | 0.000 | 0.000 | ≤ 0.15 ✅ |
+| Unsupported-kept rate | 0.085 | 0.098 | ≤ 0.55 ✅ |
+| Deadline parse recall | 0.750* | 1.000 | ≥ 0.50 ✅ |
+
+*parse_recall 0.75 vs 1.0 is sampling noise at n=4 deadline cases (pre-change
+runs on identical code showed the same 0.75/1.0 swing; field recall also
+swung 0.706→0.824 pre-change). Harness gates: 1 passed.
+
 ## Run — September 8, 2026 (after P0 audit fixes A5/A6, no prompt change)
 
 Same runtime/config as baseline; changes: category normalization gains a

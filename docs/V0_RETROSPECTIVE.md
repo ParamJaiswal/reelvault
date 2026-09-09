@@ -40,8 +40,8 @@ usage, not architecture preference.
 
 | Date | Reel | What failed | Detail |
 |---|---|---|---|
-| 2026-09-09 | 12 | Deadline not extracted | Summary says "apply by September 15"; 0 facts, 0 deadlines produced (B1/B4 recall gap) |
-| 2026-09-09 | 1-21 (all) | No fact timestamps | 0/84 facts carry t_s; click-to-seek unusable |
+| 2026-09-09 | 12 | Deadline not extracted | Summary says "apply by September 15"; 0 facts, 0 deadlines produced — root-caused 2026-09-09: prompt few-shot example leak (model parroted Zylker example) + short-value evidence floor; both fixed, reel reprocessed as id 22 with 4 evidence-backed facts |
+| 2026-09-09 | 1-21 (all) | Facts lacked timestamps in reports | AGENT REPORTING ERROR: 63/84 facts do carry evidence_t_s (OCR 22/22, transcript 41/46, caption 0/16 — captions legitimately untimed); earlier report scripts read a nonexistent field |
 | 2026-09-09 | 21 | Zero facts despite content | Hiring-tips talking-head reel: 0 facts, conf 0.35; also reel 12 miscategorized (Tutorial/Product, is job content) |
 
 ## Phase 6 deliverable questions (answer at the end)
