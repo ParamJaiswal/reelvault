@@ -410,3 +410,31 @@ Next:
   caption-only reels, llm_max_tokens truncation on dense reels (C1 timing +
   processing_events now make this measurable), malformed-JSON rate (extract retry
   decision), multi-date '01/05 and 15/06' style deadlines (ambiguous slash path).
+
+---
+
+Date: 2026-09-09
+Phase: 6 (personal-use validation) — batch 1: 12 real reels
+
+Done:
+- All 12 owner reels (ids 1-12) completed, 0 failed, 0 stuck. Serial worker ~65s/reel, healthy across the whole batch.
+- 50 facts kept total; 50/50 (100%) carry verbatim evidence quotes.
+- Search verified on real data: "Zylker hiring", "September 15", "data analysts Bangalore", "philosophy" all return the correct reels (hybrid FTS+semantic, summary-level).
+- A5 fix confirmed live: multi-word category "Personal Advice" retained on reel 2 (would have been silently dropped pre-fix).
+- Categories mostly sensible (Tutorial/Educational dominate); reel 12 miscategorized (Tutorial/Product; its summary is a job/hiring reel).
+- B5/B6/C1 active on real content (hallucination-drop counter available; per-stage timings in processing_events).
+
+Quality signals (logged, NOT hot-fixed — per AGENTS.md section 9 any fix goes through golden eval):
+- 0 facts carry timestamps (t_s absent across all 50) -> click-to-seek unavailable. Top improvement candidate.
+- 0 deadlines detected on 12 reels. Reel 12's summary contains an explicit deadline ("apply by September 15") but produced 0 facts / 0 deadlines -> B1/B4 deadline-recall gap confirmed on real content.
+- Fact-less reels (1: meme, 12) get conf 0.35.
+
+Verification:
+- API polls + POST /api/search traces (outputs above); 12/12 completed; suite state unchanged (no code touched this session).
+
+Blockers:
+- None.
+
+Next:
+- Owner supplies remaining URLs/uploads toward >=20 reels; then fill docs/V0_RETROSPECTIVE.md.
+- Candidate scoped fix session (needs owner approval + golden eval gate): (a) t_s propagation to facts for click-to-seek, (b) B4 verbatim date_text deadline prompt fix.
