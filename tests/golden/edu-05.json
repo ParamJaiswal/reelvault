@@ -1,0 +1,32 @@
+{
+ "id": "edu-05",
+ "description": "Real Phase 6 reel (mikellesplaybook): LinkedIn networking playbook. Transcript-rich how-to with heavy noisy OCR overlays. The short-value rescue path was built from this reel's earlier failure. '60 seconds' and 'comment network' are not dates - deadlines must stay empty. Labels from stored source artifacts.",
+ "caption": "Comment NETWORK and I'll send you my networking playbook! We are over complicating and over stressing about HOW to network + build a network. I'm here to simplify it for you. WSJ just confirmed 1 in 5 job postings are fake. LinkedIn Data confirmed you're 3x more likely to get hired if you have an internal connection.",
+ "transcript": [
+  {"t": 0.0, "text": "I'm going to simplify networking for you and tell you how to mine your LinkedIn connections in 60 seconds"},
+  {"t": 5.66, "text": "We're going to use AI to mine my 3,500 connections based on my goals. You're gonna go to settings in privacy"},
+  {"t": 13.74, "text": "Data privacy download your data"},
+  {"t": 16.3, "text": "You're then gonna use your favorite LLM of choice minus cloud"},
+  {"t": 19.62, "text": "You're gonna upload your connections which should be delivered to you in a CSV and you're gonna paste in this exact prompt"},
+  {"t": 29.62, "text": "The model is then going to scan your connections and give you a return prioritized table of the exact contact names"},
+  {"t": 37.18, "text": "Their exact company the title the score of how close they align to your goals and who you want to connect with"},
+  {"t": 55.03, "text": "My networking resource goes even a step further and helps you build out Boolean searches so that you are able to identify"},
+  {"t": 77.9, "text": "Again, if you want this free resource just comment network and I'll send it to you"}
+ ],
+ "ocr": [
+  {"t": 0.0, "text": "Qm looking for MikelleMasciantonioshe/Her Qwestly Talent Leader|HighGrowth Technology United States"},
+  {"t": 20.39, "text": "Connections (1).csv CSV I'm lookingthroughmy Linkedlnconnectlonsto find the strongestmatches fora sp"},
+  {"t": 61.18, "text": "tworking Playbook_Linkedin and Be... Conn 3of6 (1)cs SECTION TWO Go Cold Where Warm Comes Up Empty"}
+ ],
+ "expected": {
+  "categories": ["Tutorial", "Educational", "AI/ML"],
+  "primary": ["Tutorial", "Educational"],
+  "schema": "education",
+  "fields": {
+   "topic": ["networking"],
+   "technologies": ["linkedin"]
+  },
+  "deadlines": [],
+  "min_facts_kept": 2
+ }
+}

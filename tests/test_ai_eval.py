@@ -179,7 +179,8 @@ def run_eval(with_slm: bool | None = None):
                 continue
             m = find_evidence(quote, val, spans)
             if m.similarity < HALLUCINATION_THRESHOLD:
-                dropped.append({"field": f.get("field"), "value": val})
+                dropped.append({"field": f.get("field"), "value": val,
+                                "quote": quote[:120], "sim": m.similarity})
                 continue
             kept_facts.append(f)
         kept_total += len(kept_facts)

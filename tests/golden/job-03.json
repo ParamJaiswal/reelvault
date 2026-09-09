@@ -1,0 +1,22 @@
+{
+ "id": "job-03",
+ "description": "Real Phase 6 reel (scaledojo.dev): Microsoft Principal-Azure interview scenario. Content lives almost entirely in one OCR frame; transcript is a single word. Labels derived from stored source artifacts. No deadline stated - tests that none is fabricated.",
+ "caption": "Day 96 | Microsoft · Principal - Azure | \"A GenAI model trained on your company's private data gets acquired by a competitor. Design the architecture that makes the model useless outside your infrastructure.\"",
+ "transcript": [
+  {"t": 0.0, "text": "Marist"}
+ ],
+ "ocr": [
+  {"t": 0.0, "text": "Microsoft\u00b7Principal-Azure A GenAl model trainedon your company's private data gets acquired by a competitor. Design the architecture that makes the model useless outside your infrastructure."}
+ ],
+ "expected": {
+  "categories": ["Job", "AI/ML"],
+  "primary": ["Job"],
+  "schema": "job",
+  "fields": {
+   "company": ["microsoft"],
+   "role": ["azure"]
+  },
+  "deadlines": [],
+  "min_facts_kept": 2
+ }
+}

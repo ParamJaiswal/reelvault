@@ -353,7 +353,10 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
             continue
         m = find_evidence(quote, val, spans)
         if m.similarity < HALLUCINATION_THRESHOLD:
-            dropped.append({"field": f.get("field"), "value": val})
+            # Log WHY the fact died, not just what: quote + similarity make
+            # drop root-causing possible without re-running the model.
+            dropped.append({"field": f.get("field"), "value": val,
+                            "quote": quote[:120], "sim": m.similarity})
             continue
         conf = confidence_score(
             m.similarity, m.n_sources_agreeing, None,
@@ -443,7 +446,9 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
         msg = (f"classified {cats}, schema={schema_type}, facts kept="
                f"{len(verified_facts)}, dropped_as_hallucination={len(dropped)}")
         ev(db, reel_id, "classify_extract", msg,
-           dropped=[d["value"][:40] for d in dropped][:10],
+           dropped=[{"field": d.get("field"), "value": d["value"][:40],
+                     "quote": d["quote"], "sim": d["sim"]}
+                    for d in dropped][:10],
            served_by=served_by)
 
 

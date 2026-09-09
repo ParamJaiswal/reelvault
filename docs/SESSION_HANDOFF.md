@@ -548,3 +548,38 @@ Next:
   processing_events; (4) eval-gated extraction/evidence hardening from
   measured failures only.
 - Per AGENTS.md §11: one item only, golden eval gates every change.
+
+---
+
+Date: 2026-09-09
+Phase: 7 IN PROGRESS — steps 1-3 done (golden expansion, baseline, observability)
+
+Done:
+- Golden set expanded 13 -> 16 with real Phase 6 failure cases, labeled from
+  stored artifacts: job-03 (Microsoft/Azure OCR-only interview reel, no
+  deadline - fabrication guard), edu-04 (low-signal talking-head, 1-word
+  transcript, min_facts_kept=0), edu-05 (OCR-heavy networking how-to).
+- Expanded baseline captured (EVAL.md): multilabel 0.781, macro_f1 0.539,
+  field recall 0.762, malformed 0.0, unsupported 0.161, min-kept 0.938,
+  parse_recall 0.75 (n=4). Gates 1 passed. NOT comparable to 13-item runs.
+- Measured hardening targets recorded: (1) fact inflation on tiny content
+  (job-03: 12 kept / 9 unsupported from one OCR sentence), (2) edu-05 field
+  misses 0/2, (3) schema drift on real content (job-03 education vs job).
+- Observability fix: dropped facts now log quote (truncated 120) + similarity
+  in processing_events AND eval per-case output (was value-only). Found the
+  ev() call was discarding enrichment (value-only strings) - fixed there too.
+- New test test_classify_extract_logs_drop_reason passes.
+
+Verification:
+- Full suite: 164 passed, 1 skipped. Eval harness: 1 passed on 16-item set.
+- No extraction/prompt/evidence behavior changed this commit (logging +
+  test data only), so no eval re-gate required.
+
+Blockers:
+- None.
+
+Next:
+- Phase 7 step 4 (eval-gated hardening), smallest first: candidate fixes for
+  fact inflation on tiny content (per-field fact cap or span-diversity rule
+  in extraction prompt; must re-run 16-item eval before/after), then edu-05
+  topic/technologies probe follow-up.

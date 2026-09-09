@@ -138,6 +138,46 @@ class TestStageFlow:
                 " ON e.id=re.entity_id WHERE re.reel_id=?", (rid,))]
         assert any(e["norm_name"] == "zylker analytics" for e in ents)
 
+    def test_classify_extract_logs_drop_reason(self, tmp_db, monkeypatch,
+                                               sample_user):
+        """Dropped facts record WHY (quote + similarity) in processing_events,
+        not just the value - without this, drop root-causing needs a model
+        re-run (Phase 7 observability fix)."""
+        from app.pipeline import stages
+
+        reply = json.dumps({
+            "summary": "Hiring data analysts",
+            "key_takeaways": [], "action_items": [], "categories": ["Job"],
+            "facts": [
+                {"field": "salary", "value": "1 crore per month",
+                 "quote": "they pay one crore monthly"},   # hallucination
+            ],
+            "entities": [],
+        })
+        fl = FakeLLM(reply)
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: fl)
+
+        rid = mk_reel(sample_user, shortcode="DROPlog001")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO transcript_segments(reel_id,start_s,end_s,text)"
+                " VALUES (?,1,4,'Zylker Analytics is hiring Data Analyst interns')",
+                (rid,))
+        stages.stage_classify_extract(rid, {})
+        with get_db() as db:
+            events = [dict(r) for r in db.execute(
+                "SELECT * FROM processing_events WHERE reel_id=?"
+                " AND stage='classify_extract'", (rid,))]
+        dropped_payload = None
+        for e in events:
+            data = json.loads(e["data_json"] or "{}")
+            if data.get("dropped"):
+                dropped_payload = data["dropped"][0]
+        assert dropped_payload is not None, "no dropped-fact event recorded"
+        assert dropped_payload["value"] == "1 crore per month"
+        assert "one crore" in dropped_payload["quote"]
+        assert dropped_payload["sim"] < 0.45
+
     def test_finalize_merges_duplicates_by_shortcode(self, tmp_db, sample_user):
         from app.pipeline import stages
         keep = mk_reel(sample_user, shortcode="DUPabc123")

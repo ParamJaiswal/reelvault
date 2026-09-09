@@ -70,6 +70,80 @@ drivers). finance-01 now routes schema education/generic (B3 fix visible).
 Agent 2's A3 raises the no-timestamp confidence ceiling 0.75→0.99 — flagged
 for observation during Phase 6 real-data use.
 
+## Run — September 9, 2026 (Phase 7 step 1-2: golden set expanded with real-window items)
+
+Golden set 13 → 16 items. Added from real Phase 6 reels, labeled strictly from
+stored transcript/OCR/caption artifacts:
+- `job-03` (reel 14, scaledojo.dev): Microsoft Principal-Azure interview
+  scenario; content almost entirely in one OCR frame; NO deadline expected
+  (fabrication guard).
+- `edu-04` (reel 21, skillupchapter): low-signal hiring-tips talking-head;
+  Whisper captured one word; zero-fact failure mode; min_facts_kept=0
+  accepts the graceful outcome.
+- `edu-05` (reel 22, mikellesplaybook): LinkedIn networking playbook;
+  transcript-rich + noisy OCR; short-value rescue origin case.
+
+Baseline on expanded set (gates: 1 passed):
+
+| Metric | Expanded baseline | Sept 9 pre-expansion | Gate |
+|---|---|---|---|
+| Category multilabel accuracy (`primary`) | 0.781 | 0.769 | ≥ 0.60 ✅ |
+| Strict-or-near category hit rate | 0.875 | — | — |
+| Golden field recall | 0.762 (16/21) | 0.882 (15/17) | ≥ 0.50 ✅ |
+| Schema agreement | **0.562** | 0.562* | — |
+| Unsupported-kept rate | 0.161 | 0.085 | ≤ 0.55 ✅ |
+| min_facts_kept_rate | 0.938 (15/16) | — | ≥ 0.75 ✅ |
+| Malformed-JSON rate | 0.000 | 0.000 | ≤ 0.15 ✅ |
+| Deadline parse recall | 0.75 (3/4) | 0.75 | ≥ 0.50 ✅ |
+
+*small-sample noise; schema agreement was not printed in earlier runs.
+
+Real-item signals driving hardening candidates:
+1. `job-03` schema drift (education/job): the known schema-drift issue now
+   confirmed on real OCR-only job content.
+2. `job-03` over-extraction: 12 facts from one OCR line, 9 flagged
+   unsupported (values paraphrase the OCR question; quotes are verbatim
+   substrings, so the evidence ledger passes them).
+3. `edu-05` field probes 0/2 (topic/technologies) — extraction fields did
+   not match the labeled needles on real how-to content.
+4. Deadline recall still measured only on fictional items — the window's
+   real deadline cases were hallucination artifacts, so no real
+   deadline-bearing golden item exists yet. Owner should supply one.
+
+## Run — September 9, 2026 (PHASE 7 baseline: golden set expanded to 16 items)
+
+Phase 7 step 1-2: added 3 real-window items labeled from stored Phase 6
+artifacts — `job-03` (Microsoft/Azure interview reel: single OCR sentence,
+no deadline), `edu-04` (low-signal talking-head: 1-word transcript, OCR-only
+content, min_facts_kept=0 accepts graceful zero-fact), `edu-05` (OCR-heavy
+networking how-to). Metrics are NOT comparable to the 13-item runs (set
+changed); this is the Phase 7 hardening baseline. Harness gates: 1 passed.
+
+| Metric | Expanded baseline (16 items) |
+|---|---|
+| Category multilabel accuracy (`primary`) | 0.781 (near-hit rate 0.875) |
+| Macro F1 | 0.539 |
+| Schema agreement | 0.562 |
+| Golden field recall | 0.762 (21 probed) |
+| Content presence | 0.333 |
+| Malformed-JSON rate | 0.000 |
+| Unsupported-kept rate | 0.161 (10/62) |
+| Min-facts-kept rate | 0.938 |
+| Deadline parse recall | 0.750 (n=4) |
+| Latency (classify/extract mean) | 0.86s / 7.48s |
+
+Measured hardening targets from this baseline (Phase 7 step 4 inputs):
+1. **Fact inflation on tiny content** — job-03: 12 facts kept from one OCR
+   sentence, 9 unsupported (token overlap <40%). The model emits a fact per
+   schema field anchored to the same span; ledger can't reject tokens that
+   genuinely appear. Candidate fixes need eval gating.
+2. **edu-05 field misses** — topic/technologies 0/2 on a how-to reel (6 kept
+   facts, none in those fields).
+3. **Schema drift on real content** — job-03 classified education (B3 known
+   issue, now has a real-content instance).
+4. Observability fixed this commit: dropped facts now log quote + similarity
+   in processing_events and eval per-case output (was value-only).
+
 ## Run — September 9, 2026 (short-value rescue + anti-leak prompt guard)
 
 Changes under test:

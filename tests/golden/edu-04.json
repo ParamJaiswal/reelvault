@@ -1,0 +1,20 @@
+{
+ "id": "edu-04",
+ "description": "Real Phase 6 reel (skillupchapter): low-signal hiring-tips talking-head. Whisper captured almost nothing ('you'); all content is OCR text - the zero-fact failure mode from the window. Labels are conservative: advice content, no hard facts, no deadline. min_facts_kept=1 accepts either a minimal evidence-anchored fact or the documented zero-fact graceful outcome.",
+ "caption": "Comment down \u201cAI\u201d to get a detailed roadmap guide directly in your DM! #ai #claude #chatgpt #artificialintelligence #job",
+ "transcript": [
+  {"t": 0.34, "text": "you"}
+ ],
+ "ocr": [
+  {"t": 0.0, "text": "Nobody'shiringAI enthusiasts' anymore. Here's what gets you hired instead: 1.Rebuild a recent arXivpaper end to end"},
+  {"t": 10.5, "text": "Nobody's hiring AI enthusiasts' anymore. Here's what gets you hired instead: 1.Rebuild a recent arXiv paper end to end"}
+ ],
+ "expected": {
+  "categories": ["Job", "Personal Advice"],
+  "primary": ["Job"],
+  "schema": "generic",
+  "fields": {},
+  "deadlines": [],
+  "min_facts_kept": 0
+ }
+}
