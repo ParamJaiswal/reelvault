@@ -48,8 +48,26 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
     dt: datetime | None = None
     conf = 0.5
 
+    # 0) strict ISO YYYY-MM-DD — dateutil's dayfirst flips these when both
+    #    trailing numbers are valid months (2026-06-01 parsed as Jan 6),
+    #    so handle the unambiguous format directly
+    m_iso = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", raw)
+    if m_iso:
+        try:
+            dt = datetime(int(m_iso.group(1)), int(m_iso.group(2)),
+                          int(m_iso.group(3)))
+        except ValueError:
+            dt = None
+        else:
+            if dt < today - timedelta(days=7):   # rolled over to next year
+                try:
+                    dt = dt.replace(year=today.year + 1)
+                except ValueError:
+                    pass
+            conf = 0.85
+
     # 1) explicit numeric formats via dateutil (2026-09-15, 15/09/2026...)
-    if _du_parser is not None:
+    if dt is None and _du_parser is not None:
         import warnings
 
         try:

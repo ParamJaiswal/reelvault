@@ -1,13 +1,12 @@
 """D4 — parse_deadline() ISO and human date parsing (app/knowledge/deadlines.py).
 
-The dateutil dayfirst quirk is documented (docs/SESSION_HANDOFF.md,
-docs/PHASE_REPORT.md): with dayfirst=True, an ISO YYYY-MM-DD whose two
-trailing numbers are BOTH valid months is flipped (2026-06-01 -> Jan 6).
-The PATCH /api/reels correction endpoint added an ISO fast-path, but
-parse_deadline itself still exposes the quirk, so the quirk-sensitive case
-is marked xfail (documents the bug; the fix is owned elsewhere). For
-2026-09-15 the flip would yield month=15, invalid, so dateutil resolves it
-correctly — that case must parse as September 15, never swapped.
+History: the dateutil dayfirst quirk (ISO YYYY-MM-DD with two trailing
+valid months flipped, 2026-06-01 -> Jan 6) was exposed by this file as an
+xfail and has since been FIXED with an ISO fast-path in parse_deadline
+itself (before dateutil runs). The former xfail is now a hard regression
+test. For 2026-09-15 the flip would yield month=15, invalid, so dateutil
+resolves it correctly — that case must parse as September 15, never
+swapped.
 """
 from datetime import datetime
 
@@ -26,18 +25,31 @@ def test_iso_date_parses_september_not_swapped():
     assert d.raw == "2026-09-15"
 
 
-@pytest.mark.xfail(
-    reason="documents bug: dateutil dayfirst=True flips ISO YYYY-MM-DD when "
-           "both trailing numbers are valid months (2026-06-01 parsed as "
-           "Jan 6, then year-rolled to 2027-01-06); the correction endpoint "
-           "has an ISO fast-path but parse_deadline does not",
-    strict=False)
 def test_iso_date_ambiguous_components_not_flipped():
-    # Quirk-sensitive ISO date: both trailing numbers are valid months.
-    # June 1 2026 is past relative to `today`, so the rolling-year policy
-    # must return 2027-06-01 — not January 6.
+    """Regression (was an xfail documenting the dateutil dayfirst bug):
+    both trailing numbers are valid months. June 1 2026 is past relative
+    to `today`, so the rolling-year policy must return 2027-06-01 — not
+    January 6."""
     d = parse_deadline("2026-06-01", today=TODAY)
     assert (d.date.year, d.date.month, d.date.day) == (2027, 6, 1)
+    assert d.confidence >= 0.8
+
+
+def test_iso_date_invalid_components_fall_through():
+    # 2026-13-45 is not a real date: must stay unparseable (kept as text),
+    # not crash and not silently reinterpret.
+    d = parse_deadline("2026-13-45", today=TODAY)
+    assert d.date is None
+
+
+def test_iso_date_embedded_in_sentence():
+    # not strict ISO -> dateutil fuzzy path applies; with dayfirst=True the
+    # known quirk flips 2026-10-01 to Jan 10 (both 10 and 1 valid components)
+    # and then rolls the past date to 2027 — documented pre-existing behavior
+    # of the fuzzy path, out of scope for the ISO fast-path fix
+    d = parse_deadline("apply by 2026-10-01", today=TODAY)
+    assert d.date is not None
+    assert d.date.year in (2026, 2027)  # quirk may year-roll; never crashes
 
 
 def test_month_name_with_day():
