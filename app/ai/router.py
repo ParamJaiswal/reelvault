@@ -23,11 +23,8 @@ from app.core.config import settings
 
 log = logging.getLogger("rv.router")
 
-VALID_CATEGORIES = [
-    "Job", "Internship", "Career", "Tutorial", "Educational", "AI/ML",
-    "Data Science", "Data Analytics", "Business", "Startup", "Tool",
-    "Product", "News", "Finance", "Productivity", "Personal Advice", "Other",
-]
+from app.knowledge.schemas import VALID_CATEGORIES  # single source of truth
+
 KNOWN_SCHEMAS = {"job", "education", "tool", "event", "generic"}
 
 _CLS_SYSTEM = (
@@ -71,6 +68,7 @@ def _normalize_categories(raw_cats) -> list[str]:
         "money": "Finance", "investing": "Finance",
         "productivity": "Productivity", "other": "Other",
     }
+    valid_ci = {v.lower(): v for v in VALID_CATEGORIES}
     out: list[str] = []
     for c in raw_cats:
         if not isinstance(c, str):
@@ -81,6 +79,11 @@ def _normalize_categories(raw_cats) -> list[str]:
             if not key:
                 continue
             mapped = alias.get(key)
+            if not mapped:
+                # exact match against the valid list (case-insensitive) so a
+                # category the model returns verbatim is never silently
+                # dropped just because it lacks an alias entry
+                mapped = valid_ci.get(key)
             if mapped and mapped not in out:
                 out.append(mapped)
     return out[:4]

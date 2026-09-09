@@ -198,7 +198,10 @@ def stage_transcribe(reel_id: int, payload: dict) -> None:
         set_reel(db, reel_id, current_stage="transcribe", progress=0.35)
         wav = settings.media_dir / "audio" / f"r{reel_id}.wav"
     if not wav.exists():
-        ev_local = None
+        with get_db() as db:
+            ev(db, reel_id, "transcribe",
+               "no extracted audio on disk — cannot transcribe",
+               level="warn", code="NO_AUDIO")
         raise PermanentMediaError("No extracted audio — cannot transcribe")
 
     result = providers.get_transcriber().transcribe(str(wav), reel_id=reel_id)

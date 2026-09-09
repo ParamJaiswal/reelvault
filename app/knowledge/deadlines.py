@@ -99,9 +99,19 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
 
 
 def reminder_for(deadline_dt: datetime, days_before: int = 5) -> datetime:
-    """Deterministic reminder: N days before, never after the deadline."""
+    """Deterministic reminder: N days before, never after the deadline.
+
+    If that computed moment is already past but the deadline is still
+    ahead, clamp to now+1h so the user still gets a same-day heads-up
+    instead of silence until the deadline day itself.
+    """
+    now = datetime.now()
     r = deadline_dt - timedelta(days=days_before)
-    return r if r >= datetime.now() else deadline_dt
+    if r >= now:
+        return r
+    if deadline_dt <= now:
+        return deadline_dt  # already past — the scanner skips it anyway
+    return min(now + timedelta(hours=1), deadline_dt)
 
 
 def extract_deadline_candidates(text: str) -> list[str]:

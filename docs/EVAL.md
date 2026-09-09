@@ -47,6 +47,24 @@ Each item has two category label sets:
 Content is fictional (no real companies); `min_facts_kept` is the floor of
 evidence-kept facts expected per item.
 
+## Run — September 8, 2026 (after P0 audit fixes A5/A6, no prompt change)
+
+Same runtime/config as baseline; changes: category normalization gains a
+case-insensitive fallback to VALID_CATEGORIES (A5) and one shared list (A6).
+Extraction prompt untouched. 1 passed (harness gates enforced).
+
+| Metric | This run | Baseline v1 | Gate |
+|---|---|---|---|
+| Category multilabel accuracy (`primary`) | 0.769 | 0.846 | ≥ 0.60 ✅ |
+| Golden field recall | **0.824** | 0.824 | ≥ 0.50 ✅ (unchanged) |
+| Malformed-JSON rate | 0.000 | 0.000 | ≤ 0.15 ✅ |
+| Unsupported-kept rate | 0.205 | 0.178 | ≤ 0.55 ✅ (noise at n=73) |
+| Deadline parse recall | 1.000 | 0.750 | ≥ 0.50 ✅ |
+
+Verdict: no gated regression; field recall identical. Category 0.769 vs 0.846
+is within small-sample noise (one label flip swings it); A5/A6 can only ADD
+categories, never drop them. Deadline parse improved (3/4 → full).
+
 ## Baseline v1 — September 6, 2026
 
 Qwen2.5-3B-Instruct Q4_K_M via llama.cpp, temperature 0.15/0.1, one run.

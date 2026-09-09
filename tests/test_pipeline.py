@@ -44,9 +44,9 @@ class TestQueue:
         assert q.claim("w") is None
         q.close()
 
-    def test_retry_backoff_then_dead(self, tmp_db):
+    def test_retry_backoff_then_dead(self, tmp_db, monkeypatch):
         from app.core.config import settings
-        settings.retry_backoff_s = 0
+        monkeypatch.setattr(settings, "retry_backoff_s", 0)
         q = Queue()
         rid = mk_reel(1)
         q.enqueue(rid, ["ocr"])
