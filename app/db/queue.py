@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from contextlib import contextmanager
 from typing import Any, Callable
@@ -20,6 +21,10 @@ from app.core.config import settings
 from app.db.schema import connect
 
 log = logging.getLogger("rv.queue")
+
+# C2: the WAL file grows until a checkpoint runs; TRUNCATE-checkpointing
+# every N completed jobs keeps it bounded during long worker runs.
+WAL_CHECKPOINT_EVERY_JOBS = 100
 
 
 class StageCancelled(Exception):
@@ -61,6 +66,7 @@ def _q():
 class Queue:
     def __init__(self) -> None:
         self.handlers: dict[str, Callable[[int, dict], None]] = {}
+        self._completed_since_checkpoint = 0
 
     def close(self) -> None:  # kept for API compatibility
         pass
@@ -190,10 +196,48 @@ class Queue:
     def register(self, stage: str, handler: Callable[[int, dict], None]) -> None:
         self.handlers[stage] = handler
 
-    def run_pending(self, worker_id: str = "w0") -> int:
-        """Process all currently runnable jobs. Returns count processed."""
+    def _record_stage_timing(self, reel_id: int, stage: str,
+                             duration_s: float) -> None:
+        """Best-effort per-stage duration event (C1). Purely observational:
+        must never fail a job that just completed (e.g. reel row deleted by
+        a concurrent merge would violate the processing_events FK)."""
+        try:
+            with _q() as conn:
+                conn.execute(
+                    "INSERT INTO processing_events(reel_id, stage, level,"
+                    " message, data_json) VALUES (?,?,'info',?,?)",
+                    (reel_id, stage, f"stage completed in {duration_s:.2f}s",
+                     json.dumps({"duration_s": round(duration_s, 3)})))
+        except Exception:  # noqa: BLE001 - timing must not fail the job
+            log.debug("stage timing not recorded reel=%s stage=%s",
+                      reel_id, stage, exc_info=True)
+
+    def _wal_checkpoint(self) -> None:
+        try:
+            with _q() as conn:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            log.info("WAL checkpoint (TRUNCATE) after %d completed jobs",
+                     WAL_CHECKPOINT_EVERY_JOBS)
+        except Exception:  # noqa: BLE001 - checkpoint is opportunistic
+            log.warning("WAL checkpoint failed", exc_info=True)
+
+    def _maybe_wal_checkpoint(self) -> None:
+        if self._completed_since_checkpoint < WAL_CHECKPOINT_EVERY_JOBS:
+            return
+        self._completed_since_checkpoint = 0
+        self._wal_checkpoint()
+
+    def run_pending(self, worker_id: str = "w0",
+                    stop_event: threading.Event | None = None) -> int:
+        """Process all currently runnable jobs. Returns count processed.
+
+        stop_event: when set, no NEW job is claimed once the current one
+        finishes — lets the API worker exit cleanly between jobs on app
+        shutdown (C3) instead of picking up unbounded further work."""
         n = 0
         while True:
+            if stop_event is not None and stop_event.is_set():
+                break
             job = self.claim(worker_id)
             if not job:
                 break
@@ -205,8 +249,12 @@ class Queue:
                 continue
             try:
                 self.heartbeat(job["id"])
+                t0 = time.monotonic()
                 handler(job["reel_id"], payload)
                 self.complete(job["id"])
+                self._record_stage_timing(job["reel_id"], job["stage"],
+                                          time.monotonic() - t0)
+                self._completed_since_checkpoint += 1
             except PermanentJobError as e:
                 # Deterministic failure: skip the retry ladder entirely.
                 log.warning("permanent failure reel=%s stage=%s: %s",
@@ -229,6 +277,7 @@ class Queue:
             except Exception as e:  # noqa: BLE001 - worker boundary
                 log.exception("handler error stage=%s", job["stage"])
                 self.fail(job["id"], f"{type(e).__name__}: {e}")
+        self._maybe_wal_checkpoint()
         return n
 
     def stats(self) -> dict[str, int]:
