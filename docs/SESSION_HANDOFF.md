@@ -367,11 +367,8 @@ Verification:
 Blockers:
 - None.
 Next:
-- Fix the xfail-documented parse_deadline ISO bug (ISO fast-path) — small,
-  needs a regression test + eval only if deadline behavior changes materially.
-- Coordinator decisions: extract() one-retry (AGENTS.md permits), llm_max_tokens
-  bump for dense reels (measure truncation rate first), Pillow getdata()
-  deprecation in phash().
+- DONE 2026-09-08 (9f9a808): parse_deadline ISO fast-path — agent3's xfail bug fixed + 3 regression tests (ambiguous-components, invalid-ISO fallthrough, embedded-ISO). Eval re-run: parse_recall 1.0, recall 0.765 (noise range 0.765-0.824), unsupported 0.146, all gates pass.
+- Coordinator decisions: extract() one-retry (AGENTS.md permits), llm_max_tokens bump for dense reels (measure truncation rate first), Pillow getdata() deprecation in phash().
 - Worktree cleanup available: git worktree remove .worktrees/{agent1-router,
   agent2-evidence,agent3-tests,agent4-pipeline} + branch deletion after owner
   confirms retention preference.
