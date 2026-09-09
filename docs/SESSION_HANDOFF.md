@@ -326,3 +326,52 @@ Next:
   B4 (verbatim date_text prompt + best_deadline fallback).
 - Then P2: A1 evidence perf, B2 number normalization, B6 OCR pHash pre-dedup,
   C1 stage timing, D1-D4 test gaps.
+
+---
+
+Date: 2026-09-08
+Phase: multi-agent parallel batch (guide protocol executed end-to-end)
+Done:
+- Coordinated 4 agents per mutiagentguide.md with git worktrees under .worktrees/
+  (tag pre-parallel-work @ 5fa7a2c). Merge order per guide: tests -> router+evidence
+  -> eval -> pipeline -> final eval.
+- Agent 3 (agent3-tests, f5fcc11): 26 new tests in 4 new files (search ranking,
+  category normalization, dup check, deadline parsing). EXPOSED 1 REAL BUG via
+  xfail: parse_deadline("2026-06-01") -> 2027-01-06 (dateutil dayfirst flips ISO
+  dates when both trailing numbers are valid months). Fix candidate: ISO fast-path
+  (date.fromisoformat) inside parse_deadline — NOT yet applied.
+- Agent 1 (agent1-router, 305084f+08a10c9): B3 recipe/fitness->generic aliases
+  (finance already existed), B1 compact 4-fact few-shot example in extraction
+  prompt (1808 chars, schema-validated, quotes verbatim-by-construction),
+  B4 verbatim-date rule in BOTH schema and generic branches. Flagged:
+  llm_max_tokens=1400 truncation risk on dense reels; extract() has no retry
+  (classify does) — coordinator decisions pending.
+- Agent 2 (agent2-evidence, 0819b2c+7130b4c): A1 Jaccard pre-filter (0.20 gate,
+  containment exempt), B2 number word->digit normalization with phone/date
+  safety guards, A3 no-timestamp confidence redistribution (0.45/0.35/0.20,
+  ts-branch bit-identical), B4 best_deadline value-parse fallback at 0.5.
+  Deviation (justified): pinned 0.42->0.51 in tests/test_phase1_fixes.py (A3
+  mandates the change). Known limit: '50crore' vs '50 crore' no longer matches.
+- Agent 4 (agent4-pipeline, 10c9d78+acc28fe+82c572f): B5 whisper hallucination
+  filter (no_speech_prob>0.7 AND avg_logprob<-1.0; fields VERIFIED present in
+  providers + transcript_segments; drops counted in event data_json),
+  B6 phash frame dedup before OCR (hamming<5, frames.phash column reused),
+  C1 stage timing events from queue dispatch, C2 wal_checkpoint(TRUNCATE)
+  every 100 jobs, C3 worker stop event + bounded graceful shutdown.
+Verification:
+- Suite: 88+1 baseline -> 151 passed, 1 skipped, 1 xfailed after all merges.
+- Golden eval after agents 1-3 merge: 1 passed (recall 0.765-0.824 across 2 runs,
+  unsupported 0.12). Final eval after agent4 merge: 1 passed; recall 0.824,
+  malformed 0.0, unsupported 0.098 (halved vs 0.178 baseline), parse_recall 1.0,
+  category 0.769. Recorded in docs/EVAL.md.
+Blockers:
+- None.
+Next:
+- Fix the xfail-documented parse_deadline ISO bug (ISO fast-path) — small,
+  needs a regression test + eval only if deadline behavior changes materially.
+- Coordinator decisions: extract() one-retry (AGENTS.md permits), llm_max_tokens
+  bump for dense reels (measure truncation rate first), Pillow getdata()
+  deprecation in phash().
+- Worktree cleanup available: git worktree remove .worktrees/{agent1-router,
+  agent2-evidence,agent3-tests,agent4-pipeline} + branch deletion after owner
+  confirms retention preference.

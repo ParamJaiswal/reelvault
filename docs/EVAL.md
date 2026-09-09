@@ -47,6 +47,29 @@ Each item has two category label sets:
 Content is fictional (no real companies); `min_facts_kept` is the floor of
 evidence-kept facts expected per item.
 
+## Run — September 8, 2026 (post 4-agent parallel batch, final)
+
+After merging agent3 (tests), agent1 (B1 few-shot + B3 aliases + B4 verbatim-date
+prompt), agent2 (A1 jaccard prefilter, B2 number norm, A3 confidence
+redistribution, B4 value-parse fallback) and agent4 (B5 whisper hallucination
+filter, B6 phash frame dedup, C1 timing, C2 wal checkpoint, C3 shutdown).
+
+| Metric | Final | Baseline v1 | Gate |
+|---|---|---|---|
+| Category multilabel accuracy (`primary`) | 0.769 | 0.846 | ≥ 0.60 ✅ |
+| Golden field recall | **0.824** | 0.824 | ≥ 0.50 ✅ |
+| Malformed-JSON rate | 0.000 | 0.000 | ≤ 0.15 ✅ |
+| Unsupported-kept rate | **0.098** | 0.178 | ≤ 0.55 ✅ (halved) |
+| Deadline parse recall | 1.000 | 0.750 | ≥ 0.50 ✅ |
+
+Notes: run-to-run variance observed mid-batch (recall 0.765-0.824 across two
+runs of identical merged code — small golden set, sampling noise); final run
+matches baseline recall exactly while unsupported-kept dropped from 0.178 to
+0.098 (B2 number normalization + B5 phantom-segment filter are the likely
+drivers). finance-01 now routes schema education/generic (B3 fix visible).
+Agent 2's A3 raises the no-timestamp confidence ceiling 0.75→0.99 — flagged
+for observation during Phase 6 real-data use.
+
 ## Run — September 8, 2026 (after P0 audit fixes A5/A6, no prompt change)
 
 Same runtime/config as baseline; changes: category normalization gains a
