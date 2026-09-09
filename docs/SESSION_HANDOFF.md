@@ -374,3 +374,39 @@ Next:
 - Worktree cleanup available: git worktree remove .worktrees/{agent1-router,
   agent2-evidence,agent3-tests,agent4-pipeline} + branch deletion after owner
   confirms retention preference.
+
+---
+
+Date: 2026-09-09
+Phase: 6 kickoff — live smoke test on production code (PASS), DB returned to clean
+Done:
+- Live end-to-end smoke test with real content (scripts/make_test_reels.py job_reel.mp4:
+  TTS speech + text overlays) via upload API on :8756, all new code active:
+  - Pipeline: queued -> media -> transcribe -> ocr -> classify_extract -> embed ->
+    finalize -> completed in ~40s wall.
+  - Extraction: 5 facts kept, ALL evidence-backed (verbatim quotes from transcript/OCR),
+    conf 0.9; deadline 'September 15' -> 2026-09-15 via the new ISO-safe path; summary
+    correct. Schema job fields (company/location/role/skills/deadline) all present.
+  - B5 verified live: 8 transcript segments persisted, 0 hallucinated dropped (clean
+    audio - expected); filter active with dropped_hallucinated counter available.
+  - B6 verified live: 12 frames kept after pHash dedup (from ~26 sampled at 1.5s on a
+    14s clip - overlays visible ~2s each, dedup working as designed).
+  - C1 verified live: per-stage durations in processing_events: media 2.97s,
+    transcribe 15.81s, ocr 21.72s, classify_extract 7.31s, embed 2.83s, finalize 0.03s.
+    NOTE: OCR (21.7s) + transcribe (15.8s) = 76% of pipeline time - optimization
+    targets if speed matters later.
+  - C2/C3: WAL checkpoint counter active (job 1 of 100); worker stop event wired.
+  - Search: 'data analyst internship Bangalore' -> 1 hit, score 0.916, semantic match.
+  - Media serving: video 200, thumb 200 (resolve_media_path active).
+- Smoke reel deleted + media purged; DB returned to EMPTY, Phase 6 clean state.
+Verification:
+- Live API traces above; suite 155 passed 1 skipped (pre-smoke); DB reels count 0 after cleanup.
+Blockers:
+- None.
+Next:
+- PHASE 6 IS LIVE - owner imports >=20 REAL reels over ~2 weeks (upload = reliable
+  path; URLs best-effort). Fill docs/V0_RETROSPECTIVE.md at the end.
+- Watch in window: unsupported-kept on real content, A3 confidence lift on
+  caption-only reels, llm_max_tokens truncation on dense reels (C1 timing +
+  processing_events now make this measurable), malformed-JSON rate (extract retry
+  decision), multi-date '01/05 and 15/06' style deadlines (ambiguous slash path).
