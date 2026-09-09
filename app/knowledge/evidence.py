@@ -7,6 +7,12 @@ quality drives confidence:
 conf = 0.35 * quote_similarity + 0.25 * has_timestamped_source
        + 0.2 * multiple_sources_agree + 0.2 * model_self_confidence
 
+When no source timestamp exists the 0.25 weight is redistributed rather
+than vanishing (caption-only reels are not capped at 0.75):
+
+conf = 0.45 * quote_similarity + 0.35 * multiple_sources_agree
+       + 0.2 * model_self_confidence
+
 If no source matches at all (>0.45 sim), the fact is DROPPED as likely
 hallucination and logged. This is the anti-hallucination backbone.
 """
@@ -17,10 +23,66 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 WORD_RE = re.compile(r"[a-z0-9\u0900-\u097F₹%./+-]+")
+# "25,000" tokenizes as two tokens unless digit-group commas are joined first
+_COMMA_IN_NUMBER_RE = re.compile(r"(?<=\d),(?=\d)")
+
+_NUM_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+    "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+    "seventy": 70, "eighty": 80, "ninety": 90,
+    "hundred": 100, "thousand": 1000,
+}
+_MULTIPLIERS = ("hundred", "thousand")
+
+
+def _compose_number_tokens(tokens: list[str]) -> list[str]:
+    """Merge number-word runs into digit tokens so spoken numbers match
+    their written form ("twenty five thousand" -> "25000"). Runs without
+    a multiplier stay separate ("nine eight seven" -> "9 8 7") and digit
+    runs are left alone ("15 09 2026"), so dates/phone digits don't fuse."""
+    out: list[str] = []
+    i, n = 0, len(tokens)
+    while i < n:
+        t = tokens[i]
+        starts_number = t in _NUM_WORDS or (
+            t.isdigit() and i + 1 < n and tokens[i + 1] in _MULTIPLIERS)
+        if not starts_number:
+            out.append(t)
+            i += 1
+            continue
+        cur = 0
+        while i < n:
+            t = tokens[i]
+            if t in _NUM_WORDS:
+                v = _NUM_WORDS[t]
+            elif t.isdigit() and i + 1 < n and tokens[i + 1] in _MULTIPLIERS:
+                v = int(t)                      # "25 thousand" -> 25000
+            else:
+                break
+            i += 1
+            if v == 100:
+                cur = (cur or 1) * 100
+            elif v == 1000:
+                cur = (cur or 1) * 1000
+                break
+            elif cur >= 20 and cur % 10 == 0 and v < 10:
+                cur += v                        # "twenty five" -> 25
+            elif cur:
+                out.append(str(cur))            # "twenty twenty" stays split
+                cur = v
+            else:
+                cur = v
+        if cur:
+            out.append(str(cur))
+    return out
 
 
 def norm(text: str) -> str:
-    return " ".join(WORD_RE.findall((text or "").lower()))
+    flat = _COMMA_IN_NUMBER_RE.sub("", (text or "").lower())
+    return " ".join(_compose_number_tokens(WORD_RE.findall(flat)))
 
 
 @dataclass
@@ -37,11 +99,27 @@ class EvidenceMatch:
     n_sources_agreeing: int
 
 
+JACCARD_MIN = 0.20  # min word-set overlap before char-level matching runs
+
+
+def _jaccard(a: str, b: str) -> float:
+    """Word-set Jaccard between two already-normalized strings."""
+    sa, sb = set(a.split()), set(b.split())
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / len(sa | sb)
+
+
 def _sim(a: str, b: str) -> float:
     if not a or not b:
         return 0.0
     if a in b:
         return 1.0
+    # Pre-filter: spans sharing almost no vocabulary with the probe cannot
+    # reach the 0.45 hallucination threshold via char ratio, so skip the
+    # O(len^2) SequenceMatcher for them (set ops are O(words)).
+    if _jaccard(a, b) < JACCARD_MIN:
+        return 0.0
     return SequenceMatcher(None, a, b).ratio()
 
 
@@ -77,11 +155,16 @@ def find_evidence(quote: str, value: str, spans: list[SourceSpan]) -> EvidenceMa
 def confidence_score(match_sim: float, n_agree: int,
                      model_conf: float | None,
                      has_timestamp: bool = False) -> float:
-    """Timestamp weight applies only when a source timestamp exists."""
+    """Timestamp weight applies only when a source timestamp exists.
+    Without one, its 0.25 weight is redistributed: +0.10 to match_sim,
+    +0.15 to multi-source agreement."""
     ts = 0.25 if has_timestamp else 0.0
     multi = 1.0 if n_agree >= 2 else 0.0
     mc = model_conf if model_conf is not None else 0.5
-    score = 0.35 * match_sim + ts + 0.2 * multi + 0.2 * mc
+    if has_timestamp:
+        score = 0.35 * match_sim + ts + 0.2 * multi + 0.2 * mc
+    else:
+        score = 0.45 * match_sim + 0.35 * multi + 0.2 * mc
     return round(min(max(score, 0.05), 0.99), 2)
 
 
