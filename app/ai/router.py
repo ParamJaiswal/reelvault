@@ -95,6 +95,7 @@ SCHEMA_ALIAS = {"internship": "job", "job_opening": "job", "hiring": "job",
                 "data science": "education", "data analytics": "education",
                 "career": "generic", "advice": "generic",
                 "business": "generic", "finance": "generic",
+                "recipe": "generic", "fitness": "generic",
                 "startup": "generic", "productivity": "tool",
                 "software": "tool", "app": "tool", "website": "tool",
                 "meetup": "event", "webinar": "event", "news": "event"}
