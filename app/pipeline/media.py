@@ -8,6 +8,7 @@ phash = 64-bit DCT hash computed from downscaled grayscale frame bytes
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from pathlib import Path
 
@@ -15,6 +16,13 @@ from PIL import Image
 
 from app.core.config import settings
 from app.db.queue import PermanentJobError
+
+log = logging.getLogger("rv.media")
+
+# Near-duplicate frame suppression (B6): a sampled frame whose 64-bit phash
+# is closer than this Hamming distance to the previous KEPT frame never
+# reaches OCR — static overlays would otherwise be OCR'd once per sample.
+PHASH_MIN_HAMMING_DISTANCE = 5
 
 
 class MediaError(Exception):
@@ -111,8 +119,24 @@ def extract_audio(video: str, out_wav: str) -> str:
     return out_wav
 
 
+def hamming_distance(h1: str, h2: str) -> int:
+    """Hamming distance between two hex phash strings (0..64).
+
+    Unparseable hashes return 64 (maximally different) so a corrupt hash
+    can never cause a frame to be dropped."""
+    try:
+        return bin(int(h1, 16) ^ int(h2, 16)).count("1")
+    except (TypeError, ValueError):
+        return 64
+
+
 def sample_frames(video: str, reel_id: int, duration: float) -> list[dict]:
-    """Interval sampling capped at max_frames_per_reel; returns frame rows."""
+    """Interval sampling capped at max_frames_per_reel; returns frame rows.
+
+    Frames near-identical (phash Hamming < PHASH_MIN_HAMMING_DISTANCE) to
+    the previous kept frame are deleted before returning, so OCR only sees
+    visually distinct frames. The first frame is always kept; a frame whose
+    hash cannot be computed is kept rather than silently dropped."""
     outdir = settings.media_dir / "frames" / str(reel_id)
     outdir.mkdir(parents=True, exist_ok=True)
     interval = settings.frame_sample_interval_s
@@ -121,6 +145,8 @@ def sample_frames(video: str, reel_id: int, duration: float) -> list[dict]:
         n = 1
     step = max(interval, duration / n)
     frames = []
+    prev_hash: str | None = None
+    dropped = 0
     for i in range(n):
         t = i * step
         if t >= duration:
@@ -132,7 +158,22 @@ def sample_frames(video: str, reel_id: int, duration: float) -> list[dict]:
             capture_output=True, text=True, timeout=60,
         )
         if r.returncode == 0 and out.exists() and out.stat().st_size > 1000:
-            frames.append({"t_s": round(t, 2), "path": str(out)})
+            try:
+                h = phash(str(out))
+            except Exception:  # noqa: BLE001 - unreadable frame must survive
+                h = None
+            if (h is not None and prev_hash is not None
+                    and hamming_distance(h, prev_hash)
+                    < PHASH_MIN_HAMMING_DISTANCE):
+                dropped += 1
+                out.unlink(missing_ok=True)
+                continue
+            if h is not None:
+                prev_hash = h
+            frames.append({"t_s": round(t, 2), "path": str(out), "phash": h})
+    if dropped:
+        log.info("sample_frames reel=%s: dropped %d near-duplicate frame(s)",
+                 reel_id, dropped)
     return frames
 
 

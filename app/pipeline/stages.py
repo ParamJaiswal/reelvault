@@ -34,6 +34,14 @@ SKILL_HINTS = ["python", "sql", "excel", "power bi", "tableau", "machine learnin
                "deep learning", "nlp", "pandas", "numpy", "react", "java",
                "aws", "docker", "git", "communication"]
 
+# Whisper hallucination guard: the transcriber exposes per-segment
+# no_speech_prob and avg_logprob; segments that are simultaneously likely
+# silence AND low-confidence are classic Whisper hallucinations (e.g.
+# "Thanks for watching!" over music) and are dropped before insertion.
+# Both conditions required — either alone would drop real low-quality speech.
+WHISPER_NO_SPEECH_MAX = 0.7
+WHISPER_AVG_LOGPROB_MIN = -1.0
+
 
 def ev(db, reel_id: int, stage: str, message: str, level: str = "info", **data):
     db.execute(
@@ -163,8 +171,8 @@ def stage_media(reel_id: int, payload: dict) -> None:
         db.execute("DELETE FROM frames WHERE reel_id=?", (reel_id,))
         for fr in frames:
             db.execute(
-                "INSERT INTO frames(reel_id, t_s, path) VALUES (?,?,?)",
-                (reel_id, fr["t_s"], fr["path"]),
+                "INSERT INTO frames(reel_id, t_s, path, phash) VALUES (?,?,?,?)",
+                (reel_id, fr["t_s"], fr["path"], fr.get("phash")),
             )
         set_reel(db, reel_id, duration_s=info["duration_s"], language=None,
                  thumb_path=str(thumb),
@@ -206,24 +214,43 @@ def stage_transcribe(reel_id: int, payload: dict) -> None:
 
     result = providers.get_transcriber().transcribe(str(wav), reel_id=reel_id)
     segs = result.get("segments", [])
+    # Drop probable hallucinations before persistence. Only applies when the
+    # provider actually supplied both probability fields; segments without
+    # them are kept untouched (no thresholds on absent fields).
+    kept, dropped_halluc = [], 0
+    for s in segs:
+        nsp, alp = s.get("no_speech_prob"), s.get("avg_logprob")
+        if (isinstance(nsp, (int, float)) and isinstance(alp, (int, float))
+                and nsp > WHISPER_NO_SPEECH_MAX
+                and alp < WHISPER_AVG_LOGPROB_MIN):
+            dropped_halluc += 1
+            continue
+        kept.append(s)
     with get_db() as db:
         db.execute("DELETE FROM transcript_segments WHERE reel_id=?", (reel_id,))
-        for s in segs:
+        for s in kept:
             db.execute(
                 "INSERT INTO transcript_segments(reel_id, start_s, end_s, text,"
                 " avg_logprob, no_speech_prob) VALUES (?,?,?,?,?,?)",
                 (reel_id, s["start"], s["end"], s["text"],
                  s.get("avg_logprob"), s.get("no_speech_prob")),
             )
+        scored = [s for s in kept
+                  if isinstance(s.get("avg_logprob"), (int, float))]
         avg_conf = (
-            sum(1 - min(1, max(0, -s["avg_logprob"] / 4)) for s in segs) / len(segs)
-            if segs else 0.0
+            sum(1 - min(1, max(0, -s["avg_logprob"] / 4)) for s in scored)
+            / len(scored)
+            if scored else 0.0
         )
         set_reel(db, reel_id, language=result.get("language"),
                  progress=0.5)
-        ev(db, reel_id, "transcribe",
-           f"{len(segs)} segments, lang={result.get('language')},"
-           f" conf={avg_conf:.2f}")
+        msg = (f"{len(kept)} segments, lang={result.get('language')},"
+               f" conf={avg_conf:.2f}")
+        extra = {}
+        if dropped_halluc:
+            msg += f", {dropped_halluc} hallucinated dropped"
+            extra["dropped_hallucinated"] = dropped_halluc
+        ev(db, reel_id, "transcribe", msg, **extra)
         if avg_conf and avg_conf < 0.3:
             ev(db, reel_id, "transcribe", "low transcription confidence",
                level="warn")
