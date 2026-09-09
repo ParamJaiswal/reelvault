@@ -292,3 +292,37 @@ Next:
 - Old plaintext snapshots in backups/ contain auth data; owner may delete the ones
   before 2026-09-08 once a verified encrypted backup exists.
 - Phase 6 remains the owner's task (>=20 real reels, then docs/V0_RETROSPECTIVE.md).
+
+---
+
+Date: 2026-09-08
+Phase: audit execution — P0 batch (A5/A6/A8) + P1 A4 + hygiene A7; eval gate re-run
+Done:
+- Executed owner-supplied audit Part A P0 items + reminder clamp. All four claims
+  verified in code before fixing.
+- A5: _normalize_categories (app/ai/router.py) now falls back to case-insensitive
+  exact match against VALID_CATEGORIES after alias miss — verbatim valid categories
+  ("Personal Advice", future additions) are no longer silently dropped.
+- A6: router.py imports VALID_CATEGORIES from schemas.py (single source of truth).
+- A8: stage_transcribe missing-audio path writes a NO_AUDIO processing event before
+  raising (dead ev_local=None removed) — failures now have an audit trail.
+- A4: reminder_for() clamps past-computed reminders to now+1h while deadline is
+  still ahead; already-past deadlines unchanged. Owner authorized via audit.
+- A7: tests/test_pipeline.py retry_backoff_s leak -> monkeypatch.
+- Added tests/test_audit_p0.py (4 regression tests).
+- Eval gate re-run (AGENTS.md section 9): 1 passed; field recall 0.824 (unchanged),
+  malformed 0.0, parse_recall 1.0, category 0.769 (gate >=0.60; within small-sample
+  noise of baseline 0.846), unsupported 0.205 (gate <=0.55). Recorded in EVAL.md.
+- llama-server was down; restarted via PowerShell wrapper (verified 200 on :8091).
+Verification:
+- pytest tests -q --ignore=tests/test_ai_eval.py -> 88 passed, 1 skipped.
+- pytest tests/test_ai_eval.py -q -s -> 1 passed (161s and 231s runs).
+Blockers:
+- None.
+Next:
+- Audit P1 remaining: B1 (extraction few-shot prompt, needs eval before/after),
+  B5 (Whisper no_speech_prob filter — NOTE: verify faster-whisper segment fields
+  before implementing; handoff pitfall says provider may not expose them),
+  B4 (verbatim date_text prompt + best_deadline fallback).
+- Then P2: A1 evidence perf, B2 number normalization, B6 OCR pHash pre-dedup,
+  C1 stage timing, D1-D4 test gaps.
