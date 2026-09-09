@@ -524,3 +524,27 @@ Next:
   it (URL ingest 22/23). Retrospective recommends extraction/evidence row.
   Confirm which to lock, then update AGENTS.md §11 before starting Phase 7.
 - Phase 7 start (per AGENTS.md: "Update this plan before starting it").
+
+---
+
+Date: 2026-09-09
+Phase: 7 SELECTION LOCKED (owner confirmed)
+
+Done:
+- AGENTS.md §11 Phase 7 table updated per owner confirmation: SELECTED =
+  "Facts are inaccurate → Expand golden set and improve extraction/evidence".
+  URL-import row re-marked "(considered, NOT selected — Phase 6 measured
+  22/23 URL success)".
+
+Blockers:
+- None.
+
+Next:
+- Phase 7 kickoff scope (proposed): (1) expand tests/golden/ with real
+  Phase 6 failure cases (deadline-bearing reel, low-signal talking-head,
+  OCR-heavy networking reel) labeled from stored transcript/OCR artifacts;
+  (2) baseline eval on expanded set — measure real-content deadline recall;
+  (3) fix drop-observability: log dropped fact quotes (not just values) to
+  processing_events; (4) eval-gated extraction/evidence hardening from
+  measured failures only.
+- Per AGENTS.md §11: one item only, golden eval gates every change.
