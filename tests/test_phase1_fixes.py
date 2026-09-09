@@ -44,8 +44,8 @@ def test_confidence_without_timestamp_is_lower():
     with_ts = confidence_score(0.9, 1, None, has_timestamp=True)
     no_ts = confidence_score(0.9, 1, None, has_timestamp=False)
     assert no_ts < with_ts
-    # 0.35*0.9 + 0.2*0.5 = 0.415 — no fabricated 0.25 timestamp bonus
-    assert no_ts == pytest.approx(0.42)
+    # A3 redistribution: 0.45*0.9 + 0.2*0.5 = 0.505 — no fabricated 0.25 timestamp bonus
+    assert no_ts == pytest.approx(0.51)
 
 
 def test_confidence_with_timestamp_keeps_bonus():
