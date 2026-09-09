@@ -614,3 +614,36 @@ Next:
   technologies 0/2 stable across runs - how-to content doesn't fill
   education fields), (b) job-03 schema drift (education vs job). Both need
   eval-gated changes; do (a) or (b) next session, one at a time.
+
+---
+
+Date: 2026-09-09
+Phase: 7 step 4b — schema-drift fix landed, eval-gated
+
+Done:
+- Classify prompt rule added: job interview questions / role-play scenarios /
+  role-title-at-company content -> Job (router.py _CLS_SYSTEM).
+- Two eval runs: job-03 schema job/job in BOTH (was education); schema
+  agreement 0.562 -> 0.688 both runs (stable). Cost: multilabel 0.781 ->
+  0.750 (stable, gate >=0.60 fine); edu-04 ("Nobody's hiring AI enthusiasts")
+  now picks job schema — categories were already Job-primary there, expected
+  generic is unstable for that item. Not narrowing the rule further (would
+  be single-item overfitting / tuning by intuition).
+- Run B showed extraction-side noise (job-03 inflation returned 12/9 unsup)
+  - documented as LLM variance; extract prompt unchanged in this step.
+
+Verification:
+- Eval gates 1 passed both runs (16-item set).
+- Note: services were found down at session start; both restarted via
+  Start-Process pattern and healthy.
+
+Blockers:
+- None.
+
+Next:
+- Remaining Phase 7 measured target: edu-05 topic/technologies field misses
+  (1/2 at best across runs). Weakest-signal item; consider whether education
+  schema field names fit how-to reels at all before touching the prompt
+  (schema design question, not just a prompt fix) - decide with owner.
+- Alternatively: close Phase 7 step 4 here (two fixes landed, both
+  eval-gated, no regressions) and update AGENTS.md plan status.

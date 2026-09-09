@@ -34,7 +34,9 @@ _CLS_SYSTEM = (
     '"job|education|tool|event|generic"}\n'
     "Rules: advertising a specific opening -> Job or Internship. Teaching a "
     "skill/concept -> Tutorial or Educational. Recommending software/AI "
-    "website -> Tool.\n"
+    "website -> Tool. Job interview questions, role-play scenarios, or any "
+    "content naming a specific role/title at a company (e.g. 'Principal - "
+    "Azure', 'Senior PM interview') -> Job.\n"
     "Example 1:\n"
     'CAPTION: hiring post\n\nTRANSCRIPT:\n[00:00] Zylker is hiring data '
     'analyst interns in Bangalore, apply by September 15.\n\n'

@@ -110,6 +110,28 @@ Real-item signals driving hardening candidates:
    real deadline cases were hallucination artifacts, so no real
    deadline-bearing golden item exists yet. Owner should supply one.
 
+## Run — September 9, 2026 (PHASE 7 step 4b: classify prompt job-scenario rule)
+
+Change: classify prompt adds a rule — job interview questions / role-play
+scenarios / role-title-at-company content -> Job (fixes job-03 schema drift:
+education vs job). Two post-change runs; gates 1 passed both.
+
+| Metric | Step-4a baseline | Run A | Run B |
+|---|---|---|---|
+| Schema agreement | 0.562 | **0.688** | **0.688** |
+| Multilabel accuracy | 0.781 | 0.750 | 0.750 |
+| Macro F1 | 0.531 | 0.560 | 0.517 |
+| Field recall | 0.857/0.810 band | 0.857 | 0.762 |
+| Unsupported-kept | 0.141/0.129 | 0.137 | 0.301 (noise) |
+
+Verdict: schema drift FIXED and stable (job-03 job/job both runs;
+schema_agreement +0.126 stable). Cost: multilabel −0.031 stable (gate
+≥0.60 fine) and edu-04 ("Nobody's hiring AI enthusiasts") now picks job
+schema — categories were already Job-primary there; expected generic is
+inherently unstable for that item. Run B shows extraction noise (job-03
+12/9 unsup again) — LLM variance, unchanged code path for extract.
+Not overfitting the rule further (would be tuning by intuition).
+
 ## Run — September 9, 2026 (PHASE 7 step 4: anti-padding extraction prompt)
 
 Change: schema-branch extraction prompt gains "NEVER PAD" instruction —
