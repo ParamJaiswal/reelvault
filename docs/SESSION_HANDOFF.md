@@ -490,3 +490,37 @@ Blockers:
 Next:
 - Correct the retrospective failure-log row for timestamps (0/84 -> 63/84, caption facts legitimately untimed) - done in same commit.
 - Owner continues Phase 6 imports; B4-style prompt refinement for deadline recall can be evaluated against the new 0.882 recall baseline.
+
+---
+
+Date: 2026-09-09
+Phase: 6 COMPLETE (window closed early at owner instruction, day 3 of 14)
+
+Done:
+- docs/V0_RETROSPECTIVE.md completed: metrics filled, failure log final, all
+  5 Phase 6 questions answered from measured data, Phase 7 feature selected.
+- Final window numbers: 21 unique real reels, 21/21 completed; 88 facts, all
+  evidence-backed, 67 with evidence_t_s; 0 user corrections needed; search
+  10/10 agent-verified hits; URL ingestion 22/23 submissions succeeded; 2
+  zero-fact reels (meme, talking-head advice); 0 parseable deadlines captured
+  from real content.
+- Answers summary: (1) search recovers content — mechanism proven, organic
+  owner reliance unproven at day 3; (2) evidence makes facts trustworthy —
+  ledger demonstrably dropped 8 fabricated facts (Zylker leak case); known
+  gaps: summaries not evidence-checked, weak-but-anchored facts pass floor;
+  (3) URL was the practical path (22/23), upload untested in-window;
+  (4) top failures: extraction fidelity on low-signal reels (parroting bug
+  fixed), deadline recall ~0 on real content, observability of dropped facts;
+  (5) next feature: extraction/evidence quality (§11 row "Facts are
+  inaccurate") — grow golden set with real failures, harden extraction.
+- Phase 7 recommendation recorded in retrospective Decision section.
+
+Blockers:
+- None for Phase 6 closure.
+
+Next:
+- OWNER DECISION NEEDED: AGENTS.md §11 pre-marks "Best-effort ingest
+  reliability" as Phase 7 (pre-window pain note). Measured data contradicts
+  it (URL ingest 22/23). Retrospective recommends extraction/evidence row.
+  Confirm which to lock, then update AGENTS.md §11 before starting Phase 7.
+- Phase 7 start (per AGENTS.md: "Update this plan before starting it").

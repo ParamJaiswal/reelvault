@@ -1,9 +1,11 @@
 # V0 Retrospective — Personal-Use Validation
 
-**Status:** IN PROGRESS — do not answer the questions below until the owner has
-processed >= 20 real reels/videos over at least two weeks of actual use.
+**Status:** COMPLETED — window closed early at owner instruction (day 3 of 14,
+2026-09-09). Reel-count target met (21 ≥ 20); answers below reflect 3 days of
+batch-import usage, not two weeks of organic use — noted per question where
+it limits confidence.
 
-**Usage window opened:** 2026-09-06
+**Usage window opened:** 2026-09-06 (closed early: 2026-09-09, owner instruction)
 **Rule (AGENTS.md §11 Phase 6):** the next feature is selected from observed
 usage, not architecture preference.
 
@@ -27,14 +29,14 @@ usage, not architecture preference.
 
 | Metric | How to measure | Value at end |
 |---|---|---|
-| Real reels processed | completed reels added from real usage | 21 (as of 2026-09-09, day 3 of window) |
-| Search hits that recovered real content | each time search found something you needed | 7/7 agent-verified queries hit (batch 1+2); owner-driven count pending |
-| Search misses on content you knew existed | note each miss | 0 so far |
-| Evidence quotes inspected before trusting a fact | manual count | pending owner usage |
-| Facts corrected or deleted | `user_corrected=1` count + deletions | 1 (pre-window baseline); pending |
-| Upload vs URL ingestion split | reels imported by file vs URL | 0 upload / 21 URL |
-| Top 3 recurring failures | failure log below | see log: no timestamps, deadline miss, zero-fact reels |
-| Honest time saved vs scrolling saved content | weekly estimate | pending (min. 1 more week) |
+| Real reels processed | completed reels added from real usage | **21** (final; window closed day 3) |
+| Search hits that recovered real content | each time search found something you needed | 10/10 agent-verified queries hit correct reels; owner-driven organic searches: not exercised |
+| Search misses on content you knew existed | note each miss | 0 observed |
+| Evidence quotes inspected before trusting a fact | manual count | all 88 verified programmatically (agent); owner-driven inspection pending |
+| Facts corrected or deleted | `user_corrected=1` count + deletions | 0 (owner corrections not yet needed; UI controls smoke-tested Phase 5) |
+| Upload vs URL ingestion split | reels imported by file vs URL | 0 upload / 21 URL (22/23 submissions succeeded; 1 duplicate-guard no-op) |
+| Top 3 recurring failures | failure log below | prompt-example parroting (FIXED), deadline extraction recall, zero-fact low-signal reels |
+| Honest time saved vs scrolling saved content | weekly estimate | unknown at day 3 — cannot honestly estimate yet |
 
 ## Failure log (append as they happen)
 
@@ -52,12 +54,60 @@ usage, not architecture preference.
 4. What failed most often?
 5. What single next feature would save the most time?
 
-**Interim signals (day 3, 21 reels — NOT final answers):**
-- 84/84 facts carry verbatim quotes; URL ingestion 21/21 success (single day, small sample).
-- Worker/pipeline: 0 failures, 0 stuck jobs across both batches.
-- Dominant quality gap: timestamps absent everywhere; deadline extraction missed on the one clear deadline reel.
+## Answers (window closed early at owner instruction, day 3)
+
+**1. Did search recover content that would otherwise be lost?**
+Yes — mechanism proven: 10/10 verification queries hit the correct reels,
+including semantic matches ("data analysts Bangalore" → job summary),
+content living only in OCR/transcript, and summary-level recovery on reels
+with zero facts. Caveat: all queries were agent-run; the owner did not drive
+organic searches in the 3-day window, so daily-reliance value is unproven.
+
+**2. Did evidence make facts trustworthy?**
+Yes, structurally. 88/88 kept facts carry verbatim source quotes, and the
+ledger demonstrably rejected fabrication: 8 hallucinated facts (Zylker
+prompt-leak case) were dropped across two runs of the same reel. Known gaps:
+reel summaries are NOT evidence-checked (the one leak path), and weak-but-
+anchored facts pass the floor (e.g. "location=United States" from OCR noise).
+Confidence scores behaved honestly after the A3 redistribution.
+
+**3. Was upload or URL ingestion the practical path?**
+URL — 22/23 submissions completed end-to-end with zero download failures
+(one duplicate-guard no-op). Upload was never needed. Caveat: URL reliability
+depends on the yt-dlp path surviving Instagram changes; upload remains the
+designed fallback and is untested in this window.
+
+**4. What failed most often?**
+(a) Extraction fidelity on low-signal reels: the prompt-example parroting
+bug (root-caused and fixed Sep 9), 2 zero-fact reels (meme; talking-head
+advice), 1 miscategorization (job reel → Tutorial/Product).
+(b) Deadline extraction: only 1 deadline fact captured across 21 real reels,
+and it carries no parseable date — the v0.1 promise most underdelivered.
+(c) Observability: raw model output is not logged on fact-drop, which slowed
+root-cause work (only dropped values are recorded, not the quotes).
+
+**5. What single next feature would save the most time?**
+Extraction/evidence quality (§11 Phase 7 row "Facts are inaccurate"): grow
+the golden set with real-window failures (deadline-bearing reels, low-signal
+talking-heads) and harden extraction + evidence thresholds accordingly.
+Rationale: search (10/10) and ingestion (22/23) both measure as working; the
+bottleneck is how much trustworthy structured knowledge each reel yields —
+especially deadlines, where real-content recall is currently ~0.
 
 ## Decision at the end
 
-- Chosen next feature (from AGENTS.md §11 Phase 7 table): _
-- Evidence that drove the choice: _
+- Chosen next feature (from AGENTS.md §11 Phase 7 table): **"Facts are
+  inaccurate → Expand golden set and improve extraction/evidence"**
+- Evidence that drove the choice: search and ingestion measured as working
+  (10/10 search hits; 22/23 URL ingest); extraction quality is the observed
+  bottleneck — 8 hallucinated facts from prompt leak (fixed but showed the
+  failure mode), 0 parseable deadlines captured from 21 real reels,
+  2 zero-fact reels, 1 miscategorization, weak-but-anchored facts passing
+  the evidence floor.
+- CONFLICT FLAGGED: AGENTS.md §11 pre-marks "Best-effort ingest reliability"
+  as the Phase 7 selection (owner pain recorded before the window opened).
+  Measured window data contradicts that premise (URL ingest 22/23). Per the
+  Phase 6 rule — "the next feature is selected from observed usage, not
+  architecture preference" — this retrospective recommends the
+  extraction/evidence row. The AGENTS.md pre-mark should be updated only on
+  owner confirmation.
