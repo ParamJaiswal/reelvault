@@ -912,13 +912,20 @@ def readyz():
 
 
 # -------------------------------------------------------------- worker
+# C3: shutdown coordination — the event stops NEW job claims between jobs;
+# a job already in flight always runs to completion (never killed mid-run).
+_worker_stop = threading.Event()
+_worker_thread: threading.Thread | None = None
+
+
 def worker_loop(poll: float = settings.worker_poll_interval_s):
     wid = f"w{threading.get_ident()}"
     idle_backoff = poll
-    while True:
-        n = queue.run_pending(wid)
+    while not _worker_stop.is_set():
+        n = queue.run_pending(wid, stop_event=_worker_stop)
         if n == 0:
-            time.sleep(idle_backoff)
+            # Event-aware idle wait: shutdown interrupts it immediately
+            _worker_stop.wait(idle_backoff)
         else:
             idle_backoff = poll
 
@@ -943,13 +950,21 @@ def startup():
     from app.core import llama_manager
 
     llama_manager.start_async()   # spawn llama-server if not already up
-    t = threading.Thread(target=worker_loop, daemon=True, name="rv-worker")
-    t.start()
+    global _worker_thread
+    _worker_thread = threading.Thread(target=worker_loop, daemon=True,
+                                      name="rv-worker")
+    _worker_thread.start()
     log.info("ReelVault started; worker live; token=%s...", AUTH_TOKEN[:6])
 
 
 @app.on_event("shutdown")
 def shutdown():
+    # C3: stop claiming new jobs, then give the in-flight job a short window
+    # to finish. A job that outlives this window keeps its stale heartbeat
+    # and is reclaimed by the existing stale-job logic on the next start.
+    _worker_stop.set()
+    if _worker_thread is not None and _worker_thread.is_alive():
+        _worker_thread.join(timeout=10.0)
     from app.core import llama_manager
 
     llama_manager.shutdown()
