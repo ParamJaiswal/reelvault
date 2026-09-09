@@ -13,3 +13,6 @@ _archive/
 *.pyc
 .env
 backups/
+
+# agent worktrees
+.worktrees/
