@@ -146,6 +146,15 @@ unchanged behavior); documented, not chased. Remaining pre-existing
 follow-ups stay documented and out of scope: quote-floor rescue policy
 review and golden-corpus provenance review.
 
+Recommended future path (NOT implemented, out of accepted scope): the
+deterministic pre-pass already computes pre["skills"] from SKILL_HINTS
+(app/pipeline/stages.py) but never persists it - dead code today. A
+curated platform/tool hint list persisted as evidence-gated facts (same
+pattern as the URL/email pre-pass, matched span as quote/timestamp)
+would recover edu-05 technologies deterministically without model
+changes and without fixture contamination. Requires owner authorization
+as a new scoped phase.
+
 Kept from this iteration (additive, verified): deadline surface-form parse
 regression tests, the isolated edu-03 stage replay proving deterministic
 source-fallback persistence (evidence score 0, persisted 2026-10-05), and
