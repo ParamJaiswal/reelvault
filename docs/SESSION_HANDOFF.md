@@ -647,3 +647,126 @@ Next:
   (schema design question, not just a prompt fix) - decide with owner.
 - Alternatively: close Phase 7 step 4 here (two fixes landed, both
   eval-gated, no regressions) and update AGENTS.md plan status.
+
+---
+
+Date: 2026-09-17
+Phase: 7 — evaluation integrity; NOT complete
+Done:
+- Removed this session's uncommitted field-name prompt trial; no production
+  changes or golden-label changes retained. Do not treat edu-05's misses as
+  proof that education schema cannot represent how-to content.
+- Corrected named-field recall to use evidence-kept facts and preserve multiple
+  values per field. Added metric_version=2, per-field results, invalid field
+  reports, and opt-in RV_EVAL_TRACE=1 provider-boundary traces.
+- Eval result path now printed; write errors fail instead of disappearing.
+  conftest redirects data_dir to temporary storage, explaining earlier missing
+  files in app data. No live user records deleted/reprocessed this continuation.
+- Confirmed a substantive unresolved trust defect: raw edu-05 trace copied
+  company=Zylker with a genuine networking quote; matcher kept it at similarity
+  1.0. Quote match is not claim validation. Earlier 'all evidence-backed' and
+  'prompt leak fixed' conclusions were too strong.
+Verification:
+- Focused existing evidence/pipeline tests: 37 passed.
+- New evaluator regression tests: 9 passed, including duplicate field order,
+  rejected-fact recall, no synonym relaxation, opt-in trace and error cleanup.
+- Full non-AI suite: 173 passed, 1 skipped, 10 warnings.
+- Corrected 16-case live golden eval with RV_EVAL_TRACE=1: 1 passed in 150.01s.
+  Recall 16/21=0.762; multilabel 0.750; macro F1 0.509; schema agreement 0.688;
+  unsupported-kept heuristic 5/61=0.082; min-kept 0.938; malformed 0;
+  deadline recall 4/4=1.0 (fictional positives only). edu-05 still 0/2.
+- Saved D:/Temp/user/rv_test_zwzpsagr/eval_results.json verified to exist:
+  all 16 exact extraction traces present, aggregate kept-fact recall recomputed.
+  Temporary private output, not committed; do not assume it persists forever.
+- App /healthz and llama /health returned healthy during this continuation.
+Blockers:
+- Metric v2 not directly comparable to earlier raw-fact recall. Harness still
+  forces expected schema; empty deadlines do not test false positives. Real
+  fixture provenance/labels and quote-to-claim support require review.
+Next:
+- Add a deterministic quote/claim mismatch regression, then evaluate scoped
+  claim-support hardening. Preserve quote floor; do not tune to gold needles.
+- Changes left uncommitted for owner review; no branch or commit created.
+
+---
+
+Date: 2026-09-17
+Phase: 7 — claim-term guard checkpoint; phase NOT complete
+Done:
+- Added same-span meaningful claim-term prerequisite in evidence.py. Exact
+  fabricated Zylker + genuine networking quote regression reproduced failing
+  at similarity 1.0, then passed after the guard.
+- Added tested number/date canonicalization for measured false negatives:
+  zero, ordinal forms, month abbreviations, integer k amounts, LPA.
+- Kept existing rescue and thresholds unchanged. No prompt/schema/golden-label
+  changes. Quote-floor bypass in the old rescue is still unresolved.
+- Retained prior evaluator-integrity work; 15 claim-support tests plus nine
+  evaluator tests are included in the final full-suite result.
+Verification:
+- Full non-AI suite: 188 passed, 1 skipped, 10 warnings in 7.20s.
+- Final live 16-item golden eval with traces: 1 passed in 163.55s. Metric v2
+  recall 0.810; unsupported-kept heuristic 0.055 (3/55); min-kept 0.875;
+  deadline recall 1.0 (4 positives); multilabel 0.750; malformed 0.
+- Saved D:/Temp/user/rv_test_yp_z23xu/eval_results.json verified, 16 cases.
+- Initial guard caused deadline false negatives; final normalization restored
+  all four positive dates this run. No causal improvement claim across sampled
+  outputs. git diff --check passed.
+Blockers:
+- edu-05 final run: 0 kept / 9 dropped, fields 0/2. Meaningful paraphrases and
+  multi-segment facts can be rejected. Lexical support is not entailment.
+- Existing rescue still accepts short/missing quotes. No live data changed,
+  no service restart; do not claim the running app has this guard loaded.
+Next:
+- Separate follow-up documented in EVAL.md: replay identical captured outputs
+  to assess false negatives and remaining recall drift, then decide quote-floor
+  policy. No further tuning within this checkpoint; commit only if owner asks.
+
+---
+
+Date: 2026-09-17
+Phase: 7 — frozen-output replay complete; Phase 7 still open
+Done:
+- Added opt-in offline test_evidence_replay.py. Compares pinned committed
+  matcher f42fbef and current matcher using exactly the same recorded raw facts
+  and source spans; refuses source/prompt drift. No live model/API calls.
+- Replayed both private saved runs. Trace A: kept 66->51, field hits 16/21
+  unchanged, deadlines 4/4 unchanged, min-kept cases 14/16 unchanged. Trace B:
+  kept 76->55, field hits 18/21->17/21, deadlines 4/4 unchanged, min-kept cases
+  15/16->14/16. edu-05 kept 4->2 and 7->0 respectively.
+- Confirmed recall cost: Networking Simplification vs simplify networking;
+  yrs vs years and multi-segment claims also cause losses. Benefit: invented
+  Remote and Not specified placeholder claims lose false support.
+- Explicit conservative edu-05 acceptance regression: LinkedIn networking
+  passes with source timestamp 0.0; Zylker and Networking Simplification drop.
+  This deliberately acknowledges lexical false negatives; no claim of full
+  entailment or end-to-end edu-05 extraction success.
+Verification:
+- Each opt-in replay invocation: 3 passed in 0.09s. Private output files named
+  eval_results_replay.json beside each saved input in rv_test_7h5g488o and
+  rv_test_yp_z23xu; verified and reviewed changed decisions.
+- Determinism check: 101 unique inputs, 66 repeated identical inputs across
+  captures, no changed current-matcher result for identical inputs.
+- Full non-AI suite before final acceptance test: 190 passed, 2 skipped,
+  10 warnings in 13.53s. After acceptance test: claim suite 16 passed in 0.05s.
+- No production changes, no golden-label changes, no service restarts,
+  no user data modifications, no commit in this step.
+Blockers:
+- Guard remains conservative and can reject legitimate paraphrases/multi-span
+  facts. Old rescue quote-floor exception remains. No automatic deployment.
+Next:
+- Review conservative checkpoint before deployment. Any recall expansion or
+  strict quote-floor policy must be a separate scoped evaluation, not more
+  aggregate-score tuning. EVAL.md records the accepted behavior and limits.
+
+Final verification for this iteration (2026-09-17):
+- Added pipeline persistence regression: a genuine networking quote cannot
+  persist company=Zylker; supported LinkedIn networking persists with quote
+  and timestamp 0.0. No production edits after the guard checkpoint.
+- Full non-AI suite: 192 passed, 2 skipped, 10 warnings, 6.42s.
+- One final live golden run: 1 passed, 126.33s. Metric v2 recall 0.762;
+  unsupported-kept heuristic 1/53=0.019; min-kept 0.875; deadline recall 4/4;
+  malformed 0; multilabel 0.750. edu-05: 0 kept / 3 dropped, fields 0/2.
+  Trace written to D:/Temp/user/rv_test_wf4tigqv/eval_results.json.
+- Verdict: isolated fabrication regression fixed and tested through persistence;
+  frozen replay confirms a real recall trade-off. Not a complete extraction
+  solution or production-readiness claim. Stop iteration; changes uncommitted.

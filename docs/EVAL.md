@@ -1,6 +1,6 @@
 # AI Extraction Evaluation
 
-**Last run:** September 6, 2026 · **Branch:** `phase4-agentic` · **Status: baseline v1**
+**Last run:** September 17, 2026 · **Branch:** `v0-core` · **Status: metric v2 baseline; Phase 7 incomplete**
 
 Golden-set benchmark for classification, structured extraction, Evidence
 Ledger validation, and deadline parsing against the real Qwen/llama.cpp path
@@ -14,13 +14,21 @@ Ledger validation, and deadline parsing against the real Qwen/llama.cpp path
 D:\reelvault\.venv\Scripts\python.exe -m pytest tests\test_ai_eval.py -q -s
 ```
 
-Results are written to `<data_dir>/eval_results.json`. Excluded from the
+Results are written to `<data_dir>/eval_results.json`; the full path is printed
+and write failures fail the test. `tests/conftest.py` defaults `data_dir` to a
+temporary directory, not the application's data directory. Set `RV_EVAL_TRACE=1`
+to include exact extraction messages, request options, raw completions, and
+kept/dropped facts in that local file. Traces contain source content: keep them
+private and do not commit them. Excluded from the
 default suite (`AGENTS.md` test command ignores it) because it needs the
 live model server and takes ~2 minutes.
 
 ## Golden set
 
-`tests/golden/*.json` — 13 hand-labeled reel-like items:
+`tests/golden/*.json` — 16 items: 13 fictional reel-like fixtures plus three
+real-source-derived fixtures (`job-03`, `edu-04`, `edu-05`). The latter contain
+selected/edited excerpts and require provenance and label review; they are
+not complete raw recordings.
 
 | Domain | Items | Notes |
 |---|---|---|
@@ -44,8 +52,176 @@ Each item has two category label sets:
 - **`categories`** — full acceptable wish-list. Reported as
   `macro_f1_acceptable_labels`, not gated.
 
-Content is fictional (no real companies); `min_facts_kept` is the floor of
-evidence-kept facts expected per item.
+`min_facts_kept` is the floor of evidence-kept facts expected per item.
+
+## September 17, 2026 — frozen-output matcher replay
+
+No production changes or model calls. `tests/test_evidence_replay.py` compares
+committed matcher `f42fbef` against the current guard on identical saved raw
+facts and fixture spans. It rejects source/prompt mismatches, writes private
+per-fact decision differences beside the input trace, and reports field and
+deadline scores using metric v2 for both matchers.
+
+Run with `RV_EVAL_REPLAY=<absolute trace path> ... pytest
+ tests/test_evidence_replay.py -q -s`. This runs only on explicit opt-in;
+normal tests do not depend on private temporary files.
+
+| Frozen trace | Old/current kept | Old/current field hits | Deadlines | Old/current minimum-kept cases |
+|---|---|---|---|---|
+| rv_test_7h5g488o | 66 / 51 | 16/21 / 16/21 | 4/4 both | 14/16 / 14/16 |
+| rv_test_yp_z23xu | 76 / 55 | 18/21 / 17/21 | 4/4 both | 15/16 / 14/16 |
+
+Both replay invocations: **3 passed**. Full non-AI suite: **190 passed,
+2 skipped** (includes the opt-in replay skip), 10 warnings in 13.53s.
+Saved reports verified under each input's temporary directory as
+`eval_results_replay.json`; no private traces committed. Repeated evaluation
+of each input and 66 repeated identical inputs across these two captures
+produced identical current-matcher results (101 unique inputs checked).
+
+Trace review, not a human-labeled precision estimate:
+- Benefit: job-03 placeholder claims (`Not specified`) and invented `Remote`
+  values are rejected. The name-as-company claim on edu-05 loses its unrelated
+  networking quote support.
+- Confirmed recall cost: the one lost named-field hit in trace B is edu-05
+  `topic=Networking Simplification` versus `simplify networking`. Trace A
+  also loses `2-4 yrs` versus `years` (not a scored field in that fixture).
+- Multi-segment information is lost: edu-01's combined concepts and edu-05's
+  combined instructions cannot fit one supporting span. Some proposed quotes
+  also omit key claim terms or paraphrase source text, so simply pooling all
+  spans would be an unsafe repair.
+- `edu-05` kept count: 4 -> 2 in trace A, 7 -> 0 in trace B. The guard has a
+  real false-negative cost, not merely run-to-run model noise. Do not deploy
+  or call Phase 7 complete based only on aggregate gate passes.
+
+Acceptance pinned by `test_edu05_conservative_claim_acceptance`: using the
+actual edu-05 fixture, `LinkedIn networking` with its first transcript quote
+passes and retains timestamp 0.0; `Zylker` and `Networking Simplification`
+fail. The latter is an acknowledged lexical false negative, not a judgment
+that the paraphrase is factually wrong. All 16 claim-support tests passed
+once after adding this test. No production changes were made in this step.
+
+Final integration verification: pipeline regression proves company=Zylker
+with an unrelated networking quote is not persisted, while supported LinkedIn
+networking persists with timestamp 0.0. Full suite: **192 passed, 2 skipped**,
+10 warnings, 6.42s. One final live golden run: **1 passed** in 126.33s; recall
+0.762, unsupported-kept heuristic 0.019 (1/53), minimum-kept 0.875, deadline
+recall 4/4, malformed 0, multilabel 0.750. edu-05 still 0 kept / 3 dropped,
+fields 0/2. Output: `D:/Temp/user/rv_test_wf4tigqv/eval_results.json`.
+These sampled metrics do not replace the paired replay comparison above.
+
+This closes the frozen-output investigation, not Phase 7. Do not automatically
+expand matching or rewrite the labels to recover recall. If pursuing broader
+recall, evaluate wording variants and bounded source windows separately on
+these frozen traces while preserving unrelated-claim rejection. Quote-floor
+policy and semantic support remain unresolved.
+
+## September 17, 2026 — claim-term guard checkpoint
+
+`find_evidence` now requires meaningful claim terms to occur in the candidate
+source span before its quote-similarity score can count. The captured Zylker
+claim/networking-quote regression failed at 1.0 before the change and passes
+now. Canonicalization covers the observed number/date format mismatches
+(zero, ordinals, month abbreviations, integer k amounts, LPA). This is a
+lexical filter, not semantic entailment. Production prompts and golden labels
+are unchanged. Existing short-value rescue behavior is unchanged, including
+its ability to accept missing/short quotes; strict quote-floor enforcement
+remains open rather than being claimed complete.
+
+| Metric v2 | Immediate pre-fix | Initial guard | Final guard + normalization |
+|---|---|---|---|
+| Kept-field recall | 0.762 | 0.667 | 0.810 |
+| Unsupported-kept heuristic | 0.227 | 0.040 | 0.055 |
+| Minimum-kept rate | 0.875 | 0.875 | 0.875 |
+| Deadline recall (4 positives) | 1.000 | 0.500 | 1.000 |
+| Multilabel accuracy | 0.750 | 0.750 | 0.750 |
+| Malformed JSON | 0.000 | 0.000 | 0.000 |
+
+Commands verified on final code:
+- Non-AI suite: **188 passed, 1 skipped**, 10 warnings, 7.20s.
+- `RV_EVAL_TRACE=1 ... pytest tests/test_ai_eval.py -q -s`: **1 passed**,
+  163.55s. Saved 16-case output verified at
+  `D:/Temp/user/rv_test_yp_z23xu/eval_results.json` (private temporary file).
+- `git diff --check`: passed.
+
+### Separate follow-up: remaining recall and trust limitations
+
+The runs have different generated outputs; improvements cannot be attributed
+entirely to the matcher without replaying identical traces. No more tuning
+was done after this checkpoint.
+
+- edu-05: **0 kept / 9 dropped**, fields 0/2 in the final run. Rejected claims
+  include `Networking Simplification`, `Free networking playbook`, and combined
+  technology lists. Requiring every claim term in one span loses inflections
+  and legitimate information spread across segments. Review these as false
+  negative candidates using frozen outputs, rather than relaxing the guard
+  until an aggregate gate passes.
+- Dates retain only the tested normalization behavior; composite ordinals,
+  negation, role relationships, and arbitrary paraphrases are not verified.
+- Quote matching plus claim token presence still cannot establish a claim's
+  truth. Existing rescue/long-value fallback needs a separate quote-policy
+  decision. Summaries and field semantics remain outside this guard.
+- Phase 7 remains incomplete. Existing reels were not reprocessed or deleted;
+  no service restart/deployment of this guard was performed.
+
+## September 17, 2026 — evaluator correction and trace verification
+
+No production behavior or golden labels changed. The uncommitted field-name
+prompt trial was removed: both earlier trial runs still scored edu-05 0/2.
+
+Metric version 2 scores named fields from **evidence-kept facts**, not raw
+model facts. Multiple values for a field are tested independently; a later
+value cannot overwrite an earlier correct match. Schema field violations are
+reported separately, not silently accepted or remapped. Exact provider-boundary
+traces are opt-in. Output writes no longer suppress exceptions.
+
+Verification:
+- `pytest tests/test_eval_scoring.py -q`: 9 passed.
+- `pytest tests -q --ignore=tests/test_ai_eval.py`: 173 passed, 1 skipped.
+- `RV_EVAL_TRACE=1 ... pytest tests/test_ai_eval.py -q -s`: 1 passed,
+  150.01 seconds, 16 cases. Saved output verified at
+  `D:/Temp/user/rv_test_zwzpsagr/eval_results.json` (temporary, not committed).
+  All 16 traces present; per-case field hits recompute to 16/21.
+
+| Metric | Metric v2 baseline |
+|---|---|
+| Kept-fact named-field recall | 0.762 (16/21) |
+| Category multilabel accuracy / macro F1 | 0.750 / 0.509 |
+| Schema agreement | 0.688 |
+| Unsupported-kept token-overlap heuristic | 0.082 (5/61) |
+| Minimum-kept rate | 0.938 |
+| Malformed JSON | 0.000 |
+| Deadline parse recall | 1.000 (4 fictional positive cases) |
+| Mean classify + extract duration | 9.34 seconds |
+
+These metrics are not evidence of a production improvement; recall semantics
+changed and model outputs vary. No thresholds or labels were relaxed.
+
+### Open findings — supersede earlier claims of complete fixes
+
+- edu-05 remains 0/2; the saved run contains invalid fields `company` and
+  `technology`. A separate exact trace returned valid `technologies=AI, LLM,
+  CSV`, which does not satisfy the explicit `linkedin` needle. Those values
+  are not treated as synonyms. Missing topic, wrong field names, and a narrow
+  label are different failure modes.
+- The education extraction prompt includes a job-shaped Zylker example. A
+  captured completion copied `company=Zylker` and attached a genuine networking
+  quote; `find_evidence` scored it 1.0 and kept it. Quote presence does not
+  establish claim support. The earlier anti-copy instruction did not eliminate
+  prompt leakage or unsupported claims.
+- Extraction still uses the **expected** schema in the harness. It measures
+  extraction in isolation, not production routing. `job-03` is an interview
+  scenario, not proof of a vacancy; forcing it into job extraction needs label
+  review before further classifier tuning.
+- Empty expected-deadline lists are not negative tests; absence of parsed
+  real-world deadlines does not establish zero recall without positive labels.
+- The unsupported-kept metric is a token-overlap heuristic, not human fact
+  precision. Passing the permissive aggregate gates does not establish safety
+  of individual facts. Earlier inflation-eliminated claims are not supported
+  by the subsequent runs.
+
+Next scoped work: reproduce quote/claim mismatch in a deterministic regression
+and evaluate claim-support hardening without weakening the quote floor. Review
+real-source fixture provenance and field labels separately before relabeling.
 
 ## Run — September 8, 2026 (post 4-agent parallel batch, final)
 

@@ -165,6 +165,55 @@ def _short_value_match(value_norm: str,
     return EvidenceMatch(similarity=0.75, span=best, n_sources_agreeing=agree)
 
 
+_CLAIM_FUNCTION_WORDS = frozenset(
+    "a an the and or of for to in on at by with from is are was were be "
+    "been being it its this that these those".split()
+)
+
+# Deterministic claim-term canonicalization: the model writes "September 15"
+# where the source says "September fifteenth", "25k" where it says "twenty
+# five thousand", "NOV 30" where it says "November 30". Same fact, different
+# surface form — the claim check must not reject those.
+_CLAIM_ORDINALS = {
+    "first": "1", "second": "2", "third": "3", "fifth": "5",
+    "eighth": "8", "ninth": "9", "twelfth": "12",
+}
+_CLAIM_MONTHS = {
+    "jan": "january", "feb": "february", "mar": "march", "apr": "april",
+    "jun": "june", "jul": "july", "aug": "august", "sep": "september",
+    "sept": "september", "oct": "october", "nov": "november",
+    "dec": "december",
+}
+
+
+def _canonical_claim_token(token: str) -> str:
+    if token in _CLAIM_MONTHS:
+        return _CLAIM_MONTHS[token]
+    if token == "zero":
+        return "0"
+    if token in _CLAIM_ORDINALS:
+        return _CLAIM_ORDINALS[token]
+    if token in _NUM_WORDS:
+        return str(_NUM_WORDS[token])
+    if token.endswith("ieth") and token[:-4] + "y" in _NUM_WORDS:
+        return str(_NUM_WORDS[token[:-4] + "y"])     # twentieth -> twenty
+    if token.endswith("th") and token[:-2] in _NUM_WORDS:
+        return str(_NUM_WORDS[token[:-2]])           # fifteenth -> fifteen
+    if len(token) > 1 and token.endswith("k") and token[:-1].isdigit():
+        return str(int(token[:-1]) * 1000)           # 25k -> 25000
+    return token
+
+
+def _claim_terms(text: str) -> set[str]:
+    # Token boundaries prevent names matching inside unrelated words. Reuse
+    # number normalization and recognize the existing salary abbreviation.
+    normalized = re.sub(r"\blpa\b", "lakh per year", norm(text))
+    return {
+        _canonical_claim_token(t)
+        for t in re.findall(r"[a-z0-9\u0900-\u097F]+", normalized)
+    } - _CLAIM_FUNCTION_WORDS
+
+
 def find_evidence(quote: str, value: str, spans: list[SourceSpan]) -> EvidenceMatch:
     """Find best-matching source span for a claimed quote/value."""
     qn = norm(quote)
@@ -181,8 +230,13 @@ def find_evidence(quote: str, value: str, spans: list[SourceSpan]) -> EvidenceMa
         return EvidenceMatch(similarity=0.0, span=None, n_sources_agreeing=0)
     best_span, best = None, 0.0
     agree = 0
+    claim_terms = _claim_terms(value)
     for sp in spans:
         sn = norm(sp.text)
+        # A genuine quote cannot authenticate an unrelated claim. This is a
+        # lexical prerequisite, not a semantic entailment guarantee.
+        if not claim_terms or not claim_terms <= _claim_terms(sp.text):
+            continue
         s = max(_sim(probe, sn), _sim(alt, sn))
         # value tokens appearing in span counts as weak support
         if vn and vn in sn:

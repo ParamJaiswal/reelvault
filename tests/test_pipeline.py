@@ -178,6 +178,34 @@ class TestStageFlow:
         assert "one crore" in dropped_payload["quote"]
         assert dropped_payload["sim"] < 0.45
 
+    def test_fabricated_claim_with_real_quote_is_not_persisted(
+            self, tmp_db, monkeypatch, sample_user):
+        from app.pipeline import stages
+
+        quote = "Download your LinkedIn connections for networking"
+        reply = json.dumps({
+            "summary": "LinkedIn networking", "categories": ["Tutorial"],
+            "primary_schema": "education", "key_takeaways": [],
+            "action_items": [], "entities": [], "facts": [
+                {"field": "company", "value": "Zylker", "quote": quote},
+                {"field": "topic", "value": "LinkedIn networking", "quote": quote},
+            ],
+        })
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: FakeLLM(reply))
+        rid = mk_reel(sample_user, shortcode="CLAIMtest01")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO transcript_segments(reel_id,start_s,end_s,text)"
+                " VALUES (?,0,5,?)", (rid, quote))
+        stages.stage_classify_extract(rid, {})
+        with get_db() as db:
+            facts = [dict(r) for r in db.execute(
+                "SELECT * FROM facts WHERE reel_id=?", (rid,))]
+        assert len(facts) == 1
+        assert facts[0]["value"] == "LinkedIn networking"
+        assert facts[0]["evidence_quote"] == quote
+        assert facts[0]["evidence_t_s"] == 0.0
+
     def test_finalize_merges_duplicates_by_shortcode(self, tmp_db, sample_user):
         from app.pipeline import stages
         keep = mk_reel(sample_user, shortcode="DUPabc123")

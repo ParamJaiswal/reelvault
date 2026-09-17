@@ -120,6 +120,45 @@ def _deadline_ok(expected_date_text: str, kept_facts: list[dict]) -> bool:
     return False
 
 
+def _field_matches(expected_fields: dict, kept_facts: list[dict]) -> dict[str, bool]:
+    """Score each field once; evidence-rejected facts cannot earn recall.
+
+    Match separate values independently so duplicates neither overwrite a
+    valid match nor combine into a phrase that no individual fact contains.
+    """
+    return {
+        field: any(
+            _norm(fact.get("field")) == _norm(field)
+            and any(_norm(needle) in _norm(fact.get("value"))
+                    for needle in needles)
+            for fact in kept_facts
+        )
+        for field, needles in expected_fields.items() if field != "*"
+    }
+
+
+def _extract_with_trace(router, llm, unified: str, schema: str, capture: bool):
+    """Opt-in local trace of the actual provider boundary, without re-inference."""
+    if not capture:
+        return router.extract(unified, schema), []
+
+    from copy import deepcopy
+    from unittest.mock import patch
+
+    calls = []
+    chat = llm.chat
+
+    def traced_chat(messages, **kwargs):
+        request = {"messages": deepcopy(messages), "options": deepcopy(kwargs)}
+        raw = chat(messages, **kwargs)
+        calls.append({**request, "raw_completion": raw})
+        return raw
+
+    with patch.object(llm, "chat", side_effect=traced_chat):
+        extraction = router.extract(unified, schema)
+    return extraction, calls
+
+
 def run_eval(with_slm: bool | None = None):
     """with_slm: None=env RV_EVAL_WITH_SLM, True/False force."""
     from app.ai.providers import get_llm
@@ -147,6 +186,8 @@ def run_eval(with_slm: bool | None = None):
     dl_hits = dl_total = 0
     kept_total = dropped_total = unsupported_total = 0
     min_kept_met = 0
+    capture_trace = os.environ.get("RV_EVAL_TRACE", "") == "1"
+    from app.knowledge.schemas import SCHEMA_FIELDS
 
     for g in golden:
         exp = g["expected"]
@@ -165,7 +206,8 @@ def run_eval(with_slm: bool | None = None):
             schema_agree += 1
 
         t0 = time.time()
-        extraction = router.extract(unified, exp["schema"])
+        extraction, trace = _extract_with_trace(
+            router, llm, unified, exp["schema"], capture_trace)
         lat_ext.append(time.time() - t0)
         if not extraction:
             malformed += 1
@@ -201,16 +243,9 @@ def run_eval(with_slm: bool | None = None):
         if len(kept_facts) >= exp.get("min_facts_kept", 0):
             min_kept_met += 1
 
-        # named-field recall (needle substring in the matching field's value)
-        got_fields = {_norm(f.get("field")): _norm(f.get("value")).lower()
-                      for f in raw_facts}
-        for fname, needles in (exp.get("fields") or {}).items():
-            if fname == "*":
-                continue
-            field_total += 1
-            v = got_fields.get(_norm(fname), "")
-            if any(n in v for n in needles):
-                field_hits += 1
+        field_matches = _field_matches(exp.get("fields") or {}, kept_facts)
+        field_total += len(field_matches)
+        field_hits += sum(field_matches.values())
 
         # wildcard content-presence check (taxonomy-gap items)
         for fname, needles in (exp.get("fields") or {}).items():
@@ -239,15 +274,19 @@ def run_eval(with_slm: bool | None = None):
             "dropped": len(dropped),
             "unsupported": unsupported,
             "min_facts_met": len(kept_facts) >= exp.get("min_facts_kept", 0),
-            "field_hits": sum(
-                1 for fname, needles in (exp.get("fields") or {}).items()
-                if fname != "*" and any(
-                    n in got_fields.get(_norm(fname), "") for n in needles)),
-            "field_total": sum(1 for fname in (exp.get("fields") or {})
-                               if fname != "*"),
+            "field_hits": sum(field_matches.values()),
+            "field_total": len(field_matches),
+            "field_matches": field_matches,
+            "invalid_fields": sorted({
+                str(f.get("field")) for f in raw_facts
+                if exp["schema"] in SCHEMA_FIELDS
+                and f.get("field") not in SCHEMA_FIELDS[exp["schema"]].model_fields
+            }),
             "deadline_ok": [(_deadline_ok(d["date_text"], kept_facts))
                             for d in exp.get("deadlines", [])],
             "latency_extract_s": round(lat_ext[-1], 2),
+            **({"extraction_trace": trace, "kept_facts": kept_facts,
+                "dropped_facts": dropped} if capture_trace else {}),
         })
 
     # Label policy: `primary` = categories a precise classifier must include
@@ -257,6 +296,8 @@ def run_eval(with_slm: bool | None = None):
     acc_macro_f1 = _macro_f1(acc_sets, preds)
     n = len(golden)
     results = {
+        "metric_version": 2,  # field recall uses evidence-kept facts
+        "extraction_schema_mode": "expected",  # not end-to-end routing
         "golden_count": n,
         "router_served_by_counts": {
             k: sum(1 for s in served_bys if s == k)
@@ -298,12 +339,10 @@ def run_eval(with_slm: bool | None = None):
 
 def test_golden_benchmark(tmp_path):
     res = run_eval()
-    try:
-        from app.core.config import settings
-        (settings.data_dir / "eval_results.json").write_text(
-            json.dumps(res, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    from app.core.config import settings
+    result_path = settings.data_dir / "eval_results.json"
+    result_path.write_text(json.dumps(res, indent=2), encoding="utf-8")
+    print(f"\nEval results: {result_path}")
     print("\n=== REELVAULT AI BENCHMARK (golden set) ===")
     print(json.dumps({k: v for k, v in res.items() if k != "per_case"},
                      indent=2))
