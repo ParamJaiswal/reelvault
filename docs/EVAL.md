@@ -54,6 +54,106 @@ Each item has two category label sets:
 
 `min_facts_kept` is the floor of evidence-kept facts expected per item.
 
+## September 17, 2026 — education field-keyed candidate (not accepted)
+
+Education-only output uses validated field arrays converted to the existing
+`BaseExtraction` contract, with an explicit deadline field and temperature 0.
+Other schema prompts, evidence thresholds and golden labels are unchanged.
+No saved reels were reprocessed or deployment performed.
+
+| Metric | Prior checkpoint | Field-keyed trial |
+|---|---:|---:|
+| Kept-field recall | 0.762 | 0.714 |
+| Unsupported-kept heuristic | 0.038 | 0.019 |
+| Minimum-kept rate | 0.938 | 0.875 |
+| Kept-fact deadline recall | 1.000 | 0.500 |
+| Malformed output rate | 0 | 0 |
+
+Trial: `RV_EVAL_TRACE=1 ... pytest tests/test_ai_eval.py -q -s`, benchmark
+1 passed in 119.46s, 16 cases. Private trace:
+`D:/Temp/user/rv_test_8eyk9c97/eval_results.json`.
+Loose aggregate gates passed; quality acceptance did not. edu-01 recovered
+1/1 fields; edu-03 remained 0/1; edu-05 remained 1/2. Differences in unchanged
+job outputs also contributed to aggregate regression; causality is not
+established by this single run.
+
+Trace findings:
+- edu-05 emits networking and LLM, but omits LinkedIn as a technology.
+  Conversion tests confirm field mapping preserves the model's entries.
+- edu-03 emits `October 5th` with quote `[00:15] OCR: CLOSES OCT 5`;
+  the evidence matcher rejects it. Parsing `October 5th`, `5th of October`
+  and `CLOSES OCT 5` produces October 5 in focused tests. This is not a
+  date parser failure.
+- An isolated actual-stage replay of that deadline entry with edu-03 source
+  artifacts drops the fact but persists October 5 using the existing
+  deterministic source fallback. The benchmark deadline metric does NOT
+  measure this fallback, and must not be described as end-to-end recall.
+- A further instruction-only revision failed the targeted live checks
+  (1 passed, 2 failed in 24.61s). Only that revision was removed.
+- A bounded second-pass recall experiment (separate technologies/deadline
+  call, source-line verification, dedupe) also failed the same live checks
+  and was removed. Both mechanisms are documented as measured dead ends.
+- A third mechanism, an education-domain worked example (watercolor/Procreate,
+  no fixture values), was tried and measured WORSE: the example taught
+  paraphrased values ("networking simplification") that the claim-term guard
+  correctly dropped, losing even previously-passing topic fields
+  (edu-01/03/05 all false live). Reverted; job prompt untouched throughout.
+- Verified the input hypothesis is false: the model DOES receive "LinkedIn"
+  and "RAG" in transcript+caption spans; the omission is model value
+  selection, not input construction.
+- Entity bridge also measured dead: live runs show the model emits tool
+  entities for edu-01 (FAISS, Qdrant) but NO LinkedIn entity for edu-05, so
+  an entity-to-fact bridge cannot recover the missing value.
+
+FIX DELIVERED (uncommitted): entity evidence guard. Live runs exposed the
+model copying "Zylker" from the job example into education ENTITIES, and
+stage_classify_extract persisted entities with NO evidence validation -
+a direct violation of the trust policy (AGENTS.md section 8). Entities now
+pass the same find_evidence gate as facts; unsupported names are dropped
+and logged in the classify_extract event; surviving reel_entities rows keep
+the matched span's quote and timestamp. Regression test:
+test_entity_hallucination_is_not_persisted (fabricated Zylker dropped,
+supported LinkedIn kept with t_s=0.0). Full suite 197 passed, 2 skipped.
+The golden harness replicates only the fact loop, so benchmark metrics are
+unaffected by this change by construction.
+
+Decision: the field-keyed candidate was REVERTED to checkpoint c00be1d
+behavior (git checkout of router.py, schemas.py and their tests).
+CORRECTION after a 4-run variance study: the original revert rationale
+("checkpoint measured better: 0.762 vs 0.714") was a single-run
+misattribution. The unchanged checkpoint itself measures recall 0.714,
+0.714, 0.810 and deadline recall 0.75, 0.75, 1.00 across three fresh runs
+(plus the earlier 0.762/1.00 run); edu-03 flips 0/1 <-> 1/1 between runs
+and job-02 flips 3/4 <-> 4/4. Education field hits were 2/4 in BOTH the
+checkpoint and field-keyed candidates. The aggregate differences that
+drove the revert were run variance at temperature 0.15, not candidate
+quality. The revert outcome stands for a different reason: field-keyed
+did not fix edu-05 either (0/2 in both) and adds schema complexity.
+
+Stable finding across all 4 runs and every prompt variant tried: edu-05
+technologies is 0/2 - Qwen2.5-3B never emits LinkedIn as a technology
+under the checkpoint prompt, field-keyed prompt, extra wording, second
+pass, worked example, or grammar-constrained output. This is a model
+capability ceiling, not a prompt/plumbing defect. Fix options require an
+owner decision: larger model, a different extraction paradigm, or
+accepting the limitation.
+
+Owner decision (2026-09-18): limitation ACCEPTED. No larger model, no
+extraction-paradigm change, no further prompt iterations for education
+recall. The entity evidence guard is the accepted scoped Phase 7
+increment. edu-03 deadline remains run-variance (flips between runs of
+unchanged behavior); documented, not chased. Remaining pre-existing
+follow-ups stay documented and out of scope: quote-floor rescue policy
+review and golden-corpus provenance review.
+
+Kept from this iteration (additive, verified): deadline surface-form parse
+regression tests, the isolated edu-03 stage replay proving deterministic
+source-fallback persistence (evidence score 0, persisted 2026-10-05), and
+the finding that the benchmark deadline metric does not measure that
+fallback. Remaining limitation: education platform/tool recall (edu-05
+LinkedIn) is unsolved; fixing it requires a different extraction strategy,
+not more prompt wording.
+
 ## September 17, 2026 — frozen-output matcher replay
 
 No production changes or model calls. `tests/test_evidence_replay.py` compares

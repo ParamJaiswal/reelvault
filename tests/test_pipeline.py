@@ -206,6 +206,94 @@ class TestStageFlow:
         assert facts[0]["evidence_quote"] == quote
         assert facts[0]["evidence_t_s"] == 0.0
 
+    def test_education_deadline_replay_uses_source_fallback(
+            self, tmp_db, monkeypatch, sample_user):
+        from datetime import datetime
+        from pathlib import Path
+
+        from app.knowledge import deadlines
+        from app.pipeline import stages
+        from test_ai_eval import _unified_and_spans
+        from app.knowledge.evidence import find_evidence
+
+        case = json.loads((Path(__file__).parent / "golden" / "edu-03.json")
+                          .read_text(encoding="utf-8"))
+        _, spans = _unified_and_spans(case)
+        # Deadline entry isolated from the saved field-keyed trial output.
+        entry = {"value": "October 5th", "quote": "[00:15] OCR: CLOSES OCT 5"}
+        assert find_evidence(entry["quote"], entry["value"], spans).similarity == 0
+        today = datetime(2026, 9, 6)
+        expected = deadlines.parse_deadline("5th of October", today=today).date
+        assert deadlines.parse_deadline(entry["value"], today=today).date == expected
+        original = deadlines.best_deadline
+        monkeypatch.setattr(deadlines, "best_deadline",
+                            lambda facts, text: original(facts, text, today=today))
+        replies = iter([
+            json.dumps({"categories": ["Educational"], "primary_schema": "education"}),
+            json.dumps({"deadline": [entry]}),
+        ])
+        llm = FakeLLM("")
+        monkeypatch.setattr(llm, "chat", lambda *args, **kwargs: next(replies))
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: llm)
+        rid = mk_reel(sample_user, shortcode="EDUdeadline")
+        with get_db() as db:
+            db.execute("UPDATE reels SET caption=? WHERE id=?", (case["caption"], rid))
+            for segment in case["transcript"]:
+                db.execute("INSERT INTO transcript_segments(reel_id,start_s,end_s,text)"
+                           " VALUES (?,?,?,?)",
+                           (rid, segment["t"], segment["t"] + 1, segment["text"]))
+            for overlay in case["ocr"]:
+                db.execute("INSERT INTO ocr_results(reel_id,t_s,text,conf) VALUES (?,?,?,?)",
+                           (rid, overlay["t"], overlay["text"], 1.0))
+        stages.stage_classify_extract(rid, {})
+        with get_db() as db:
+            row = db.execute("SELECT deadline_iso, deadline_raw FROM reels WHERE id=?",
+                             (rid,)).fetchone()
+            assert db.execute("SELECT COUNT(*) FROM facts WHERE reel_id=?", (rid,)).fetchone()[0] == 0
+        assert row["deadline_iso"] is not None
+        persisted = datetime.fromisoformat(row["deadline_iso"]).date()
+        print(f"edu-03 replay: evidence_score=0; parsed_date={expected.date()}; "
+              f"persisted_deadline={persisted}; golden_date={expected.date()}; "
+              f"source_fallback={row['deadline_raw']!r}")
+        assert persisted == expected.date()
+
+    def test_entity_hallucination_is_not_persisted(
+            self, tmp_db, monkeypatch, sample_user):
+        """Entities are model output too: a name no source span supports must
+        not enter the entity graph, while supported entities keep evidence."""
+        from app.pipeline import stages
+
+        reply = json.dumps({
+            "summary": "s", "categories": ["Tutorial"],
+            "primary_schema": "education", "key_takeaways": [],
+            "action_items": [], "facts": [], "entities": [
+                {"name": "Zylker", "kind": "company"},
+                {"name": "LinkedIn", "kind": "tool",
+                 "quote": "mine your LinkedIn connections"},
+            ],
+        })
+        monkeypatch.setattr(stages.providers, "get_llm",
+                            lambda: FakeLLM(reply))
+        rid = mk_reel(sample_user, shortcode="ENTtest001")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO transcript_segments(reel_id,start_s,end_s,text)"
+                " VALUES (?,0,5,'I mine my LinkedIn connections daily')", (rid,))
+        stages.stage_classify_extract(rid, {})
+        with get_db() as db:
+            ents = [dict(r) for r in db.execute(
+                "SELECT e.norm_name, re.evidence_t_s FROM reel_entities re"
+                " JOIN entities e ON e.id=re.entity_id WHERE re.reel_id=?",
+                (rid,))]
+            events = [json.loads(r["data_json"] or "{}") for r in db.execute(
+                "SELECT data_json FROM processing_events WHERE reel_id=?"
+                " AND stage='classify_extract'", (rid,))]
+        assert ents == [("linkedin", 0.0)] or [
+            (e["norm_name"], e["evidence_t_s"]) for e in ents
+        ] == [("linkedin", 0.0)]
+        assert any(d.get("value") == "Zylker" for e in events
+                   for d in e.get("dropped", []))
+
     def test_finalize_merges_duplicates_by_shortcode(self, tmp_db, sample_user):
         from app.pipeline import stages
         keep = mk_reel(sample_user, shortcode="DUPabc123")

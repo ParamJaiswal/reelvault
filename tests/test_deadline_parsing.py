@@ -75,6 +75,13 @@ def test_day_first_slash_date():
     assert (d.date.year, d.date.month, d.date.day) == (2026, 9, 15)
 
 
+@pytest.mark.parametrize("text", ["5th of October", "October 5th", "CLOSES OCT 5"])
+def test_education_deadline_surface_forms_parse_same_date(text):
+    d = parse_deadline(text, today=TODAY)
+    assert d.date is not None
+    assert d.date.date() == datetime(2026, 10, 5).date()
+
+
 def test_empty_input_is_unparseable_and_safe():
     d = parse_deadline("", today=TODAY)
     assert d.date is None and d.reminder_date is None

@@ -426,6 +426,14 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
             kind = (ent.get("kind") or "other").strip().lower()[:30]
             if not name:
                 continue
+            # Entities are model output too: a name that no source span
+            # supports is a hallucination and must not enter the graph.
+            ent_quote = (ent.get("quote") or "").strip()
+            m = find_evidence(ent_quote, name, spans)
+            if m.similarity < HALLUCINATION_THRESHOLD:
+                dropped.append({"field": f"entity:{kind}", "value": name,
+                                "quote": ent_quote[:120], "sim": m.similarity})
+                continue
             row = db.execute(
                 "SELECT id FROM entities WHERE user_id=? AND norm_name=? AND kind=?",
                 (reel["user_id"], name.lower(), kind)).fetchone()
@@ -440,7 +448,8 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
             db.execute(
                 "INSERT OR IGNORE INTO reel_entities(reel_id, entity_id,"
                 " evidence_quote, evidence_t_s) VALUES (?,?,?,?)",
-                (reel_id, eid, (ent.get("quote") or "")[:300], None))
+                (reel_id, eid, (m.span.text if m.span else ent_quote)[:300],
+                 m.span.t_s if m.span else None))
 
     with get_db() as db:
         msg = (f"classified {cats}, schema={schema_type}, facts kept="

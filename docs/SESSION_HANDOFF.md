@@ -770,3 +770,116 @@ Final verification for this iteration (2026-09-17):
 - Verdict: isolated fabrication regression fixed and tested through persistence;
   frozen replay confirms a real recall trade-off. Not a complete extraction
   solution or production-readiness claim. Stop iteration; changes uncommitted.
+
+---
+
+Date: 2026-09-17
+Phase: 7 — checkpoint c00be1d revalidated; open limitations retained
+Done:
+- Confirmed prior guard/evaluator/replay work is committed as c00be1d.
+- Explored a bounded transcript-window fallback with test-only work; it was
+  not implemented. Removed only that new uncommitted test file. Production
+  code remains c00be1d; no prompt/threshold/label changes or deployment.
+Verification:
+- Non-AI suite: 192 passed, 2 skipped, 10 warnings in 9.14s.
+- Golden eval with traces: 1 passed in 161.09s; metric v2 recall 0.762,
+  unsupported-kept heuristic 2/52=0.038, min-kept 0.938, deadline recall 4/4,
+  malformed 0, multilabel 0.750. edu-05: 2 kept, 2 dropped, fields 0/2.
+- Output reported at D:/Temp/user/rv_test_x5n237fn/eval_results.json.
+Blockers:
+- Passing aggregate gates is not proof of semantic claim support. Existing
+  rescue still bypasses strict quote-floor policy; multi-segment and paraphrase
+  recall remain limited. Phase 7 not declared fully complete.
+Next:
+- Owner review of conservative checkpoint and its deployment/quality trade-off.
+  Do not repeat tuning or revalidation without a new scoped acceptance target.
+
+Date: 2026-09-17
+Phase: 7 — education candidate reverted; checkpoint c00be1d restored
+Done:
+- Diagnosed edu-05 via live runs and saved traces: model never emits LinkedIn
+  as a technology (emits LLM only); claim-term guard correctly drops an
+  invented difficulty value. Evidence matcher proven capable when a LinkedIn
+  value IS emitted (test_edu05_conservative_claim_acceptance).
+- Tried and removed two mechanisms: extra prompt wording (1 passed, 2 failed
+  live) and a bounded second-pass recall call (same failures). Both are
+  measured dead ends, not silent reverts.
+- Reverted field-keyed candidate to checkpoint behavior (router.py,
+  schemas.py, related tests). Checkpoint measured better: recall 0.762,
+  deadline recall 1.000, min-kept 0.938 vs 0.714/0.500/0.875.
+- Kept additive verified work: deadline surface-form parse tests, isolated
+  edu-03 stage replay (evidence score 0, persisted 2026-10-05 via existing
+  deterministic source fallback), benchmark-metric limitation documented.
+Verification:
+- Full non-AI suite: 196 passed, 2 skipped, 11 warnings in 15.95s.
+- Single-test confirmation of the restored Zylker-rejection pipeline test.
+- Live edu-05 extraction run: technologies=[LLM] only, no LinkedIn emitted;
+  all kept facts sim=1.0 except correctly-dropped invented difficulty.
+Blockers:
+- Education platform/tool recall (edu-05 LinkedIn) unsolved. Phase 7 open.
+- No commit, deployment, label edits, threshold relaxation or reprocessing.
+Next:
+- Owner decision on a genuinely different extraction strategy for missing
+  platform facts; do not repeat prompt wording or second-pass trials.
+
+Date: 2026-09-17
+Phase: 7 — recall mechanisms exhausted; entity evidence guard delivered
+Done:
+- Tried and removed a third recall mechanism (education worked example):
+  measured worse live (paraphrased values dropped by claim-term guard,
+  edu-01/03/05 all false). Reverted; job prompt untouched.
+- Verified model input contains the missing values (LinkedIn, RAG present
+  in transcript+caption spans) — omission is model value selection.
+- Entity bridge measured dead: model emits FAISS/Qdrant entities for
+  edu-01 but no LinkedIn entity for edu-05.
+- Fixed a real trust-policy violation found during entity tracing: entities
+  were persisted with NO evidence validation. stage_classify_extract now
+  runs every entity through find_evidence; unsupported names are dropped
+  and logged; supported entities keep matched-span quote and timestamp.
+  Live runs had shown Zylker (job-example copy) entering education entities.
+Verification:
+- New regression: test_entity_hallucination_is_not_persisted passes
+  (fabricated Zylker dropped, supported LinkedIn kept, t_s=0.0).
+- Full non-AI suite: 197 passed, 2 skipped, 11 warnings in 8.42s.
+- Live education runs: edu-01/03/05 kept-field matches all false with the
+  example prompt; checkpoint prompt restores prior behavior (topic true).
+- Benchmark metrics unaffected by the entity guard by construction (harness
+  replicates the fact loop only); no new benchmark run needed for it.
+Blockers:
+- edu-05 technologies (LinkedIn) is the ONLY stable extraction failure:
+  0/2 across 4 runs of unchanged checkpoint behavior and all 5 prompt
+  variants tried (checkpoint, field-keyed, extra wording, second pass,
+  worked example, grammar-constrained). Model capability ceiling at
+  Qwen2.5-3B; requires an owner decision (larger model / different
+  paradigm / accept limitation).
+- CORRECTION of the earlier entry: edu-03 deadline is NOT a stable miss -
+  it flips 0/1 <-> 1/1 between runs of the unchanged checkpoint (variance
+  study: recall 0.714/0.714/0.810, deadline 0.75/0.75/1.00). The prior
+  "field-keyed regressed recall" rationale was single-run misattribution;
+  education hits were 2/4 in both candidates. Phase 7 open. No commit.
+Next:
+- Owner decision required: accept the entity guard as a scoped Phase 7
+  increment, and choose whether education recall work continues via a
+  different strategy (e.g. larger model or two-stage classify-then-verify)
+  or pauses with the limitation documented.
+
+Date: 2026-09-18
+Phase: 7 — CLOSED with accepted limitation
+Done:
+- Owner decision recorded: education recall limitation ACCEPTED. No larger
+  model, no paradigm change, no further prompt iterations. Entity evidence
+  guard is the accepted scoped Phase 7 increment.
+- One further hypothesis (strict one-shot technologies-only prompt or
+  dedicated pass) was evaluated against session evidence and disregarded:
+  the dedicated pass was already measured dead (1/3 live), a worked example
+  measured worse (0/3 live), and a LinkedIn-specific example would be
+  fixture contamination, violating the no-fixture-specific-extraction rule.
+Verification:
+- Full non-AI suite: 197 passed, 2 skipped (final tree, this session).
+- Variance study (3 runs) and all probe results recorded in docs/EVAL.md.
+Blockers:
+- None for the accepted scope. edu-05 technologies stays 0/2, documented.
+Next:
+- Owner authorization to commit the working tree (stages.py entity guard,
+  deadline parse tests, edu-03 replay test, EVAL/handoff docs) as the
+  Phase 7 closing checkpoint.
