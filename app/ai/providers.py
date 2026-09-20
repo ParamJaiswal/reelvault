@@ -90,6 +90,62 @@ class LlamaCppProvider:
             raise
 
 
+class OpenAICompatProvider:
+    """Any OpenAI-compatible chat API (Groq, Gemini, OpenRouter, etc.).
+    Requires RV_LLM_API_KEY in env. Uses the same /chat/completions contract
+    as LlamaCppProvider so golden-set A/B is a config swap."""
+
+    name = "openai_compat"
+
+    def __init__(self, base_url: str | None = None, model: str | None = None,
+                 api_key: str | None = None):
+        self.base_url = (base_url or settings.llm_server_url).rstrip("/")
+        self.model = model or settings.llm_model_name
+        import os
+        self.api_key = api_key or os.environ.get("RV_LLM_API_KEY", "")
+
+    def available(self) -> bool:
+        if not self.api_key:
+            return False
+        try:
+            r = httpx.get(f"{self.base_url}/models",
+                          headers={"Authorization": f"Bearer {self.api_key}"},
+                          timeout=5)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    def chat(self, messages: list[dict], max_tokens: int = 700,
+             temperature: float = 0.2, json_mode: bool = False,
+             reel_id: int | None = None) -> str:
+        if not self.api_key:
+            raise RuntimeError("RV_LLM_API_KEY not set for openai_compat backend")
+        body: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if json_mode:
+            body["response_format"] = {"type": "json_object"}
+        t0 = time.time()
+        try:
+            r = httpx.post(
+                f"{self.base_url}/chat/completions", json=body, timeout=120,
+                headers={"Authorization": f"Bearer {self.api_key}"})
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"]
+            usage = r.json().get("usage", {})
+            _record_run("llm.chat", self.name, self.model, t0, True,
+                        reel_id=reel_id, tokens_in=usage.get("prompt_tokens"),
+                        tokens_out=usage.get("completion_tokens"))
+            return text
+        except Exception as e:  # noqa: BLE001
+            _record_run("llm.chat", self.name, self.model, t0, False,
+                        reel_id=reel_id, error=str(e))
+            raise
+
+
 # ------------------------------------------------------------ Transcription
 class Transcriber(Protocol):
     name: str
@@ -317,7 +373,13 @@ _embedder: EmbeddingProvider | None = None
 def get_llm() -> LLMProvider:
     global _llm
     if _llm is None:
-        _llm = LlamaCppProvider()
+        backend = settings.llm_backend
+        if backend == "openai_compat":
+            _llm = OpenAICompatProvider()
+        elif backend == "none":
+            raise RuntimeError("llm_backend=none — no LLM available")
+        else:
+            _llm = LlamaCppProvider()
     return _llm
 
 

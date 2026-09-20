@@ -28,14 +28,16 @@ class _FakeEmbedder:
 
 
 def _add_reel(uid, title, summary, *, status="completed", confidence=0.8):
-    from app.db.schema import get_db
+    from app.db.schema import get_db, refresh_fts
 
     with get_db() as db:
         cur = db.execute(
             "INSERT INTO reels(user_id, source_kind, status, title, summary,"
             " confidence) VALUES (?,?,?,?,?,?)",
             (uid, "upload", status, title, summary, confidence))
-        return cur.lastrowid
+        rid = cur.lastrowid
+    refresh_fts(rid)
+    return rid
 
 
 def _add_reel_embedding(reel_id, vec):

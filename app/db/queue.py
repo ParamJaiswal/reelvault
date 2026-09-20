@@ -49,6 +49,21 @@ STAGES = [
     "finalize",
 ]
 
+# Kind-aware stage plans. Video keeps full pipeline; text sources skip
+# media/transcribe. OCR stays available for image-bearing posts and PDFs.
+STAGE_PLANS: dict[str, list[str]] = {
+    "video": ["media", "transcribe", "ocr", "classify_extract", "embed", "finalize"],
+    "x_post": ["ocr", "classify_extract", "embed", "finalize"],
+    "article": ["classify_extract", "embed", "finalize"],
+    "paper": ["ocr", "classify_extract", "embed", "finalize"],
+    "note": ["classify_extract", "embed", "finalize"],
+    "linkedin_post": ["ocr", "classify_extract", "embed", "finalize"],
+}
+
+
+def stages_for_kind(content_kind: str) -> list[str]:
+    return STAGE_PLANS.get(content_kind, STAGE_PLANS["video"])
+
 
 @contextmanager
 def _q():

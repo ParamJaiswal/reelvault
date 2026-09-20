@@ -138,22 +138,33 @@ def create_reel_from_request(uid: int, req: IngestRequest) -> dict:
                 return {"duplicate": True,
                         "reel_id": dup["id"], "status": dup["status"]}
 
+        content_kind = resolved.get("content_kind", "video")
         cur = db.execute(
             "INSERT INTO reels(user_id, source_kind, source_url, shortcode,"
-            " caption, author_handle, media_path, title)"
-            " VALUES (?,?,?,?,?,?,?,?)",
+            " caption, author_handle, media_path, title, content_kind)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
             (uid, req.kind, resolved.get("source_url"), shortcode,
              resolved.get("caption") or "", resolved.get("author_handle") or "",
-             resolved.get("media_path"), (req.meta.get("title") or "")[:120]))
+             resolved.get("media_path"), (req.meta.get("title") or "")[:120],
+             content_kind))
         reel_id = cur.lastrowid
         ev_row = None
+    # Store document body for text-first sources
+    doc_body = resolved.get("meta", {}).get("body_text") or resolved.get("meta", {}).get("tweet_text")
+    if doc_body and content_kind != "video":
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO documents(reel_id, body_text, source_url, mime_type)"
+                " VALUES(?,?,?,'text/html')",
+                (reel_id, doc_body, resolved.get("source_url")))
     # URL reels have no media yet: the ingest stage runs download_reel.
-    # enqueue() defaults to STAGES[1:], so ingest must be added explicitly
-    # or the download never runs and media dies with "No media on disk".
+    # Use kind-aware stage plans so text sources skip media/transcribe.
+    from app.db.queue import stages_for_kind
+    plan = stages_for_kind(content_kind)
     if resolved.get("needs_download"):
-        queue.enqueue(reel_id, STAGES)
+        queue.enqueue(reel_id, ["ingest"] + plan)
     else:
-        queue.enqueue(reel_id)
+        queue.enqueue(reel_id, plan)
     log.info("ingested reel=%s via %s", reel_id, adapter.name)
     return {"duplicate": False, "reel_id": reel_id, "status": "queued"}
 

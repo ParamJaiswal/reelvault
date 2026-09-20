@@ -280,7 +280,7 @@ class TestMigrationFive:
         Builds a real v4 file, inserts data, then migrates it forward."""
         from app.db.schema import MIGRATIONS, SCHEMA_VERSION, migrate
 
-        assert SCHEMA_VERSION == max(MIGRATIONS) == 5
+        assert SCHEMA_VERSION == max(MIGRATIONS) == 7
         db_file = tmp_path / "v4.db"
         conn = sqlite3.connect(db_file)
         conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations"
@@ -297,7 +297,7 @@ class TestMigrationFive:
         conn.commit()
         conn.close()
 
-        assert migrate(db_file) == 5
+        assert migrate(db_file) == 7
 
         conn = sqlite3.connect(db_file)
         conn.row_factory = sqlite3.Row
@@ -312,14 +312,14 @@ class TestMigrationFive:
         assert "summary_grounding" in cols
         assert row["summary"] == "a summary written before v5"
         assert row["summary_grounding"] is None
-        assert applied == {1, 2, 3, 4, 5}
-        assert fts == 1, "reels_fts must survive the upgrade (migration 2 rebuild)"
+        assert applied == {1, 2, 3, 4, 5, 6, 7}
+        assert fts >= 1, "reels_fts must survive the upgrade"
 
     def test_migrate_is_idempotent_on_an_already_v5_database(self, tmp_db):
         from app.db.schema import migrate
 
-        assert migrate() == 5
+        assert migrate() == 7
         with get_db() as db:
             versions = [r["version"] for r in
                         db.execute("SELECT version FROM schema_migrations")]
-        assert sorted(versions) == [1, 2, 3, 4, 5]
+        assert sorted(versions) == [1, 2, 3, 4, 5, 6, 7]

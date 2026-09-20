@@ -163,8 +163,30 @@ ADAPTERS: list[IngestionAdapter] = [
     FileIngestionAdapter(),
 ]
 
+_v2_loaded = False
+
+
+def _ensure_v2_adapters() -> None:
+    """Load v2 multi-source adapters once. Called lazily by route() to avoid
+    circular imports when adapter modules import base.py."""
+    global _v2_loaded
+    if _v2_loaded:
+        return
+    _v2_loaded = True
+    try:
+        from app.ingest.adapters.x_adapter import XPostAdapter
+        ADAPTERS.insert(0, XPostAdapter())
+    except ImportError:
+        pass
+    try:
+        from app.ingest.adapters.article_adapter import ArticleAdapter
+        ADAPTERS.insert(0, ArticleAdapter())
+    except ImportError:
+        pass
+
 
 def route(req: IngestRequest) -> tuple[IngestionAdapter, dict[str, Any]]:
+    _ensure_v2_adapters()
     for a in ADAPTERS:
         if a.matches(req):
             return a, a.resolve(req)

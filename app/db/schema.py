@@ -17,7 +17,7 @@ from typing import Any, Iterator
 
 from app.core.config import settings
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -292,6 +292,40 @@ MIGRATIONS: dict[int, str] = {
     -- until they are re-saved).
     ALTER TABLE reels ADD COLUMN summary_grounding REAL;
     """,
+    6: """
+    -- Widen FTS to cover facts, transcript, and OCR text.
+    -- FTS5 external-content tables mirror the content table schema and
+    -- can't be altered. Switch to contentless FTS5 with manual indexing
+    -- via refresh_fts() called at finalize.
+    DROP TRIGGER IF EXISTS reels_ai;
+    DROP TRIGGER IF EXISTS reels_ad;
+    DROP TRIGGER IF EXISTS reels_au;
+    DROP TABLE IF EXISTS reels_fts;
+
+    CREATE VIRTUAL TABLE reels_fts USING fts5(
+        title, summary, caption, author_handle,
+        facts_text, transcript_text, ocr_text,
+        content=''
+    );
+    """,
+    7: """
+    -- Multi-source content kind. 'video' is default (v0.1 compat).
+    -- Text sources (x_post, article, paper, note) skip media/transcribe stages.
+    ALTER TABLE reels ADD COLUMN content_kind TEXT NOT NULL DEFAULT 'video';
+
+    -- Document body storage for text-first sources (articles, papers, notes).
+    -- Separate from reels.caption which is short-form metadata.
+    CREATE TABLE IF NOT EXISTS documents (
+        id INTEGER PRIMARY KEY,
+        reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+        body_text TEXT NOT NULL,
+        source_url TEXT,
+        mime_type TEXT,
+        page_count INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_documents_reel ON documents(reel_id);
+    """,
 }
 
 
@@ -318,6 +352,73 @@ def get_db() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _backfill_fts_v6(conn) -> None:
+    """Populate contentless FTS index from reels + facts/transcript/OCR.
+    Called once after migration 6; safe to re-run."""
+    reel_ids = [r[0] for r in conn.execute("SELECT id FROM reels")]
+    for rid in reel_ids:
+        row = conn.execute(
+            "SELECT title, summary, caption, author_handle FROM reels WHERE id=?",
+            (rid,)).fetchone()
+        if not row:
+            continue
+        facts = " ".join(
+            r[0] for r in conn.execute(
+                "SELECT value FROM facts WHERE reel_id=? AND value IS NOT NULL", (rid,)))
+        transcript = " ".join(
+            r[0] for r in conn.execute(
+                "SELECT text FROM transcript_segments WHERE reel_id=? ORDER BY start_s", (rid,)))
+        ocr = " ".join(
+            r[0] for r in conn.execute(
+                "SELECT text FROM ocr_results WHERE reel_id=?", (rid,)))
+        conn.execute(
+            "INSERT INTO reels_fts(rowid, title, summary, caption, author_handle,"
+            " facts_text, transcript_text, ocr_text)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (rid, row[0], row[1], row[2], row[3], facts, transcript, ocr))
+
+
+def refresh_fts(reel_id: int) -> None:
+    """Re-index one reel into contentless FTS.
+    Call after pipeline stages write to reels/facts/transcript/OCR/documents."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT title, summary, caption, author_handle FROM reels WHERE id=?",
+            (reel_id,)).fetchone()
+        if not row:
+            return
+        facts = " ".join(
+            r[0] for r in db.execute(
+                "SELECT value FROM facts WHERE reel_id=? AND value IS NOT NULL", (reel_id,)))
+        transcript = " ".join(
+            r[0] for r in db.execute(
+                "SELECT text FROM transcript_segments WHERE reel_id=? ORDER BY start_s", (reel_id,)))
+        ocr = " ".join(
+            r[0] for r in db.execute(
+                "SELECT text FROM ocr_results WHERE reel_id=?", (reel_id,)))
+        doc_body = " ".join(
+            r[0] for r in db.execute(
+                "SELECT body_text FROM documents WHERE reel_id=?", (reel_id,)))
+        # Merge document body into ocr_text column for search (same weight)
+        combined_ocr = " ".join(filter(None, [ocr, doc_body]))
+        # Contentless FTS: delete must match exact previously-inserted values.
+        old = db.execute(
+            "SELECT title, summary, caption, author_handle,"
+            " facts_text, transcript_text, ocr_text"
+            " FROM reels_fts WHERE rowid=? LIMIT 1", (reel_id,)).fetchone()
+        if old:
+            db.execute(
+                "INSERT INTO reels_fts(reels_fts, rowid, title, summary, caption,"
+                " author_handle, facts_text, transcript_text, ocr_text)"
+                " VALUES('delete',?,?,?,?,?,?,?,?)",
+                (reel_id, old[0], old[1], old[2], old[3], old[4], old[5], old[6]))
+        db.execute(
+            "INSERT INTO reels_fts(rowid, title, summary, caption, author_handle,"
+            " facts_text, transcript_text, ocr_text)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (reel_id, row[0], row[1], row[2], row[3], facts, transcript, combined_ocr))
+
+
 def migrate(db_path: Path | None = None) -> int:
     """Apply pending migrations; returns final schema version."""
     with get_db() if db_path is None else _ctx(db_path) as conn:
@@ -334,6 +435,8 @@ def migrate(db_path: Path | None = None) -> int:
             conn.execute(
                 "INSERT INTO schema_migrations(version) VALUES (?)", (version,)
             )
+            if version == 6:
+                _backfill_fts_v6(conn)
         return max(MIGRATIONS)
 
 

@@ -131,6 +131,12 @@ def stage_media(reel_id: int, payload: dict) -> None:
     _guard(reel_id)
     with get_db() as db:
         reel = get_reel(db, reel_id)
+        # Text-only sources skip media processing entirely
+        kind = reel.get("content_kind", "video") if hasattr(reel, "get") else "video"
+        if kind != "video":
+            set_reel(db, reel_id, current_stage="media", progress=0.15)
+            ev(db, reel_id, "media", f"skipped (content_kind={kind})")
+            return
         set_reel(db, reel_id, current_stage="media", progress=0.15)
         mp = resolve_media_path(reel["media_path"], "video")
 
@@ -209,6 +215,11 @@ def stage_transcribe(reel_id: int, payload: dict) -> None:
     _guard(reel_id)
     with get_db() as db:
         reel = get_reel(db, reel_id)
+        kind = reel.get("content_kind", "video") if hasattr(reel, "get") else "video"
+        if kind != "video":
+            set_reel(db, reel_id, current_stage="transcribe", progress=0.35)
+            ev(db, reel_id, "transcribe", f"skipped (content_kind={kind})")
+            return
         set_reel(db, reel_id, current_stage="transcribe", progress=0.35)
         wav = settings.media_dir / "audio" / f"r{reel_id}.wav"
     if not wav.exists():
@@ -610,6 +621,12 @@ def stage_finalize(reel_id: int, payload: dict) -> None:
                 " SELECT user_id, ?, 'processed', 'Reel processed: '||COALESCE(NULLIF(title,''),'Reel'),"
                 " COALESCE(summary,'') FROM reels WHERE id=?", (reel_id, reel_id))
             ev(db, reel_id, "finalize", "processing complete")
+
+    from app.db.schema import refresh_fts
+    try:
+        refresh_fts(reel_id)
+    except Exception:  # noqa: BLE001 — FTS refresh must never block finalize
+        log.exception("FTS refresh failed for reel %d", reel_id)
 
 
 def semantic_duplicate_check(reel_id: int) -> int | None:

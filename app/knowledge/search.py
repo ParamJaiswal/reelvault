@@ -24,19 +24,31 @@ def keyword_search(user_id: int, query: str, limit: int = 30) -> list[dict]:
     if not fts_query:
         return []
     with get_db() as db:
-        rows = db.execute(
-            """
-            SELECT r.id, r.title, r.summary, r.categories_json, r.status,
-                   r.confidence, r.priority, r.starred, r.author_handle,
-                   r.ingested_at,
-                   bm25(reels_fts) AS rank
-            FROM reels_fts f JOIN reels r ON r.id = f.rowid
-            WHERE reels_fts MATCH ? AND r.user_id=?
-            ORDER BY rank LIMIT ?
-            """,
-            (fts_query, user_id, limit),
+        # Contentless FTS: get matching rowids first, then fetch from reels
+        fts_rows = db.execute(
+            "SELECT rowid, bm25(reels_fts) AS rank FROM reels_fts"
+            " WHERE reels_fts MATCH ? ORDER BY rank LIMIT ?",
+            (fts_query, limit * 2),
         ).fetchall()
-    return [dict(r) | {"match_type": "keyword"} for r in rows]
+        if not fts_rows:
+            return []
+        ids = [r["rowid"] for r in fts_rows]
+        placeholders = ",".join("?" * len(ids))
+        rows = db.execute(
+            f"SELECT id, title, summary, categories_json, status,"
+            f" confidence, priority, starred, author_handle, ingested_at"
+            f" FROM reels WHERE id IN ({placeholders}) AND user_id=?",
+            (*ids, user_id),
+        ).fetchall()
+    rank_map = {r["rowid"]: r["rank"] for r in fts_rows}
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["rank"] = rank_map.get(d["id"], 0)
+        d["match_type"] = "keyword"
+        results.append(d)
+    results.sort(key=lambda x: x["rank"])
+    return results[:limit]
 
 
 def semantic_search(user_id: int, query_vec: list[float],
