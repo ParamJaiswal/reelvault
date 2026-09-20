@@ -161,3 +161,62 @@ def test_document_body_stored_for_text_source(tmp_db):
     db.close()
     assert row is not None
     assert "transformer" in row[0]
+
+
+def test_paper_adapter_matches_arxiv():
+    from app.ingest.adapters.paper_adapter import PaperAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = PaperAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="https://arxiv.org/abs/2301.08745")
+    assert a.matches(req) is True
+
+
+def test_paper_adapter_matches_doi():
+    from app.ingest.adapters.paper_adapter import PaperAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = PaperAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="https://doi.org/10.1038/s41586-021-03819-2")
+    assert a.matches(req) is True
+
+
+def test_paper_adapter_rejects_non_paper():
+    from app.ingest.adapters.paper_adapter import PaperAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = PaperAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="https://example.com/blog/post")
+    assert a.matches(req) is False
+
+
+def test_paper_adapter_arxiv_resolve():
+    from app.ingest.adapters.paper_adapter import PaperAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = PaperAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="https://arxiv.org/abs/1706.03762")
+    xml = """<?xml version="1.0"?>
+    <entry>
+      <title>Attention Is All You Need</title>
+      <summary>The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.</summary>
+      <author><name>Ashish Vaswani</name></author>
+      <author><name>Noam Shazeer</name></author>
+    </entry>"""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = xml
+    mock_resp.raise_for_status = MagicMock()
+    with patch("app.ingest.adapters.paper_adapter.httpx.get", return_value=mock_resp):
+        result = a.resolve(req)
+    assert result["content_kind"] == "paper"
+    assert "Attention" in result["meta"]["title"]
+    assert "transduction" in result["meta"]["body_text"]
+    assert result["shortcode"] == "1706.03762"
+
+
+def test_paper_adapter_registered():
+    from app.ingest.adapters.base import ADAPTERS, _ensure_v2_adapters
+    _ensure_v2_adapters()
+    names = [a.name for a in ADAPTERS]
+    assert "paper" in names

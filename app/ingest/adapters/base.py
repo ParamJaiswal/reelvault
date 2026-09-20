@@ -183,6 +183,11 @@ def _ensure_v2_adapters() -> None:
         ADAPTERS.insert(0, ArticleAdapter())
     except ImportError:
         pass
+    try:
+        from app.ingest.adapters.paper_adapter import PaperAdapter
+        ADAPTERS.insert(0, PaperAdapter())
+    except ImportError:
+        pass
 
 
 def route(req: IngestRequest) -> tuple[IngestionAdapter, dict[str, Any]]:
