@@ -332,7 +332,7 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
         doc_row = db.execute(
             "SELECT body_text FROM documents WHERE reel_id=? LIMIT 1",
             (reel_id,)).fetchone()
-    doc_body = doc_row["body_text"] if doc_row else ""
+    doc_body = (doc_row["body_text"] if doc_row else "")[:10_000]
     caption = reel["caption"] or ""
     transcript = "\n".join(f"[{fmt_ts(s['start_s'])}] {s['text']}" for s in segs)
     overlay = "\n".join(f"[{fmt_ts(o['t_s'])}] OCR: {o['text']}" for o in ocrs)

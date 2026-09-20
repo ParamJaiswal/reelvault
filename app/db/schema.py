@@ -17,7 +17,7 @@ from typing import Any, Iterator
 
 from app.core.config import settings
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -326,6 +326,16 @@ MIGRATIONS: dict[int, str] = {
     );
     CREATE INDEX IF NOT EXISTS idx_documents_reel ON documents(reel_id);
     """,
+    8: """
+    -- Shadow table for contentless FTS5 delete support.
+    -- Contentless FTS returns NULL on SELECT, so we store last-inserted
+    -- values here to enable correct delete-before-reinsert in refresh_fts.
+    CREATE TABLE IF NOT EXISTS reels_fts_shadow (
+        reel_id INTEGER PRIMARY KEY,
+        title TEXT, summary TEXT, caption TEXT, author_handle TEXT,
+        facts_text TEXT, transcript_text TEXT, ocr_text TEXT
+    );
+    """,
 }
 
 
@@ -376,6 +386,44 @@ def _backfill_fts_v6(conn) -> None:
             " facts_text, transcript_text, ocr_text)"
             " VALUES (?,?,?,?,?,?,?,?)",
             (rid, row[0], row[1], row[2], row[3], facts, transcript, ocr))
+        # Shadow table may not exist yet (created in migration 8)
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO reels_fts_shadow(reel_id, title, summary, caption,"
+                " author_handle, facts_text, transcript_text, ocr_text)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (rid, row[0], row[1], row[2], row[3], facts, transcript, ocr))
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _backfill_fts_shadow(conn) -> None:
+    """Populate shadow table for all existing reels after migration 8."""
+    reel_ids = [r[0] for r in conn.execute("SELECT id FROM reels")]
+    for rid in reel_ids:
+        row = conn.execute(
+            "SELECT title, summary, caption, author_handle FROM reels WHERE id=?",
+            (rid,)).fetchone()
+        if not row:
+            continue
+        facts = " ".join(
+            r[0] for r in conn.execute(
+                "SELECT value FROM facts WHERE reel_id=? AND value IS NOT NULL", (rid,)))
+        transcript = " ".join(
+            r[0] for r in conn.execute(
+                "SELECT text FROM transcript_segments WHERE reel_id=? ORDER BY start_s", (rid,)))
+        ocr = " ".join(
+            r[0] for r in conn.execute(
+                "SELECT text FROM ocr_results WHERE reel_id=?", (rid,)))
+        doc_body = " ".join(
+            r[0] for r in conn.execute(
+                "SELECT body_text FROM documents WHERE reel_id=?", (rid,)))
+        combined_ocr = " ".join(filter(None, [ocr, doc_body]))
+        conn.execute(
+            "INSERT OR REPLACE INTO reels_fts_shadow(reel_id, title, summary, caption,"
+            " author_handle, facts_text, transcript_text, ocr_text)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (rid, row[0], row[1], row[2], row[3], facts, transcript, combined_ocr))
 
 
 def refresh_fts(reel_id: int) -> None:
@@ -401,11 +449,11 @@ def refresh_fts(reel_id: int) -> None:
                 "SELECT body_text FROM documents WHERE reel_id=?", (reel_id,)))
         # Merge document body into ocr_text column for search (same weight)
         combined_ocr = " ".join(filter(None, [ocr, doc_body]))
-        # Contentless FTS: delete must match exact previously-inserted values.
+        # Contentless FTS: use shadow table for delete (FTS SELECT returns NULLs)
         old = db.execute(
             "SELECT title, summary, caption, author_handle,"
             " facts_text, transcript_text, ocr_text"
-            " FROM reels_fts WHERE rowid=? LIMIT 1", (reel_id,)).fetchone()
+            " FROM reels_fts_shadow WHERE reel_id=?", (reel_id,)).fetchone()
         if old:
             db.execute(
                 "INSERT INTO reels_fts(reels_fts, rowid, title, summary, caption,"
@@ -415,6 +463,12 @@ def refresh_fts(reel_id: int) -> None:
         db.execute(
             "INSERT INTO reels_fts(rowid, title, summary, caption, author_handle,"
             " facts_text, transcript_text, ocr_text)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (reel_id, row[0], row[1], row[2], row[3], facts, transcript, combined_ocr))
+        # Update shadow table with current values
+        db.execute(
+            "INSERT OR REPLACE INTO reels_fts_shadow(reel_id, title, summary, caption,"
+            " author_handle, facts_text, transcript_text, ocr_text)"
             " VALUES(?,?,?,?,?,?,?,?)",
             (reel_id, row[0], row[1], row[2], row[3], facts, transcript, combined_ocr))
 
@@ -437,6 +491,9 @@ def migrate(db_path: Path | None = None) -> int:
             )
             if version == 6:
                 _backfill_fts_v6(conn)
+            if version == 8:
+                # Backfill shadow table for all existing FTS entries
+                _backfill_fts_shadow(conn)
         return max(MIGRATIONS)
 
 

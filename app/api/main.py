@@ -148,15 +148,14 @@ def create_reel_from_request(uid: int, req: IngestRequest) -> dict:
              resolved.get("media_path"), (req.meta.get("title") or "")[:120],
              content_kind))
         reel_id = cur.lastrowid
-        ev_row = None
-    # Store document body for text-first sources
-    doc_body = resolved.get("meta", {}).get("body_text") or resolved.get("meta", {}).get("tweet_text")
-    if doc_body and content_kind != "video":
-        with get_db() as db:
+        # Store document body in same transaction as reel insert
+        doc_body = resolved.get("meta", {}).get("body_text") or resolved.get("meta", {}).get("tweet_text")
+        if doc_body and content_kind != "video":
             db.execute(
                 "INSERT INTO documents(reel_id, body_text, source_url, mime_type)"
                 " VALUES(?,?,?,'text/html')",
                 (reel_id, doc_body, resolved.get("source_url")))
+        ev_row = None
     # URL reels have no media yet: the ingest stage runs download_reel.
     # Use kind-aware stage plans so text sources skip media/transcribe.
     from app.db.queue import stages_for_kind

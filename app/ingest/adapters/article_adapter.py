@@ -6,6 +6,7 @@ respects robots.txt intent. No bulk crawling.
 """
 from __future__ import annotations
 
+import ipaddress
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -13,6 +14,24 @@ from urllib.parse import urlparse
 import httpx
 
 from app.ingest.adapters.base import IngestionAdapter, IngestRequest
+
+
+def _is_safe_url(url: str) -> bool:
+    """Reject private/reserved IPs to prevent SSRF."""
+    try:
+        host = urlparse(url).hostname or ""
+        if not host:
+            return False
+        # Resolve hostname and check all addresses
+        import socket
+        infos = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for family, _, _, _, sockaddr in infos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local:
+                return False
+        return True
+    except Exception:
+        return False
 
 # Domains we don't try to ingest (social platforms have their own adapters)
 SKIP_DOMAINS = {
@@ -51,6 +70,8 @@ class ArticleAdapter(IngestionAdapter):
 
     def resolve(self, req: IngestRequest) -> dict[str, Any]:
         url = req.url or ""
+        if not _is_safe_url(url):
+            raise ValueError("URL resolves to a private or reserved address.")
         try:
             r = httpx.get(
                 url, timeout=30, follow_redirects=True,

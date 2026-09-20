@@ -57,7 +57,7 @@ class LinkedInAdapter(IngestionAdapter):
                 "content_kind": "linkedin_post",
                 "meta": {"title": meta.get("title", "")},
             }
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
 
         # Fallback: extract what we can from the URL + user-provided caption

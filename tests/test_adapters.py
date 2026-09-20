@@ -289,3 +289,64 @@ def test_source_span_has_page_field():
     # Default is None for backward compat
     span2 = SourceSpan(text="test", t_s=1.0, source="transcript")
     assert span2.page is None
+
+
+def test_article_adapter_rejects_localhost():
+    """SSRF protection: localhost URLs are rejected."""
+    import pytest
+    from app.ingest.adapters.article_adapter import ArticleAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = ArticleAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="http://127.0.0.1:8756/healthz")
+    with pytest.raises(ValueError, match="private or reserved"):
+        a.resolve(req)
+
+
+def test_error_sanitization_strips_bearer():
+    """API keys and Bearer tokens are redacted from error strings."""
+    from app.ai.providers import _sanitize_error
+    err = "HTTP 401: Bearer sk-abc123xyz invalid"
+    assert "sk-abc123xyz" not in _sanitize_error(err)
+    assert "[REDACTED]" in _sanitize_error(err)
+
+
+def test_error_sanitization_strips_api_key():
+    from app.ai.providers import _sanitize_error
+    err = "api_key=sk-secret123 failed"
+    assert "sk-secret123" not in _sanitize_error(err)
+
+
+def test_fts_shadow_table_exists(tmp_db):
+    """Migration 8 creates reels_fts_shadow table."""
+    import sqlite3
+    db = sqlite3.connect(str(tmp_db))
+    tables = [r[0] for r in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")]
+    db.close()
+    assert "reels_fts_shadow" in tables
+
+
+def test_refresh_fts_updates_shadow(tmp_db):
+    """refresh_fts writes to shadow table for correct delete-on-update."""
+    import sqlite3
+    from app.db.schema import get_db, refresh_fts
+
+    with get_db() as db:
+        uid = db.execute(
+            "INSERT INTO users(username, display_name, api_key_hash)"
+            " VALUES('u','U','')").lastrowid
+        rid = db.execute(
+            "INSERT INTO reels(user_id, source_kind, content_kind, source_url,"
+            " title, status, current_stage)"
+            " VALUES(?,'upload','video','http://x','Test','completed','done')",
+            (uid,)).lastrowid
+
+    refresh_fts(rid)
+
+    db = sqlite3.connect(str(tmp_db))
+    row = db.execute("SELECT title FROM reels_fts_shadow WHERE reel_id=?",
+                     (rid,)).fetchone()
+    db.close()
+    assert row is not None
+    assert row[0] == "Test"

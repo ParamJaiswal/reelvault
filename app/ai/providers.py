@@ -26,6 +26,19 @@ log = logging.getLogger("rv.ai")
 
 
 # ----------------------------------------------------------------- helpers
+import re as _re
+
+_BEARER_RE = _re.compile(r"Bearer\s+[A-Za-z0-9._\-]+", _re.I)
+_API_KEY_RE = _re.compile(r"(?:api[_-]?key|token|secret)[=:]\s*\S+", _re.I)
+
+
+def _sanitize_error(msg: str) -> str:
+    """Strip Bearer tokens and API key values from error strings."""
+    msg = _BEARER_RE.sub("Bearer [REDACTED]", msg)
+    msg = _API_KEY_RE.sub("[REDACTED]", msg)
+    return msg[:500]
+
+
 def _record_run(task: str, backend: str, model: str, t0: float, ok: bool,
                 reel_id: int | None = None, tokens_in: int | None = None,
                 tokens_out: int | None = None, error: str | None = None) -> None:
@@ -35,7 +48,7 @@ def _record_run(task: str, backend: str, model: str, t0: float, ok: bool,
                 "INSERT INTO ai_runs(reel_id, task, backend, model, latency_ms,"
                 " tokens_in, tokens_out, ok, error) VALUES (?,?,?,?,?,?,?,?,?)",
                 (reel_id or None, task, backend, model, int((time.time() - t0) * 1000),
-                 tokens_in, tokens_out, int(ok), (error or "")[:500]),
+                 tokens_in, tokens_out, int(ok), _sanitize_error(error or "")),
             )
     except Exception:  # noqa: BLE001 - telemetry must never break the pipeline
         log.exception("ai_runs insert failed")
