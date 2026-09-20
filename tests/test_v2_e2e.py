@@ -131,6 +131,28 @@ def test_x_video_tweet_still_skips_ingest(client, tmp_db):
     assert doc is not None and "demo" in doc[0]
 
 
+def test_text_source_title_persisted(client, tmp_db):
+    """Regression: adapter-supplied meta.title must land in reels.title
+    (live finding: arXiv paper title was dropped, UI showed empty titles)."""
+    xml = ("<feed><title>arXiv Query: junk</title><entry>"
+           "<title>Language Models are Few-Shot Learners</title>"
+           "<summary>Recent work has demonstrated substantial gains.</summary>"
+           "<author><name>Tom Brown</name></author></entry></feed>")
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.text = xml
+    resp.raise_for_status = MagicMock()
+    with patch("app.ingest.adapters.paper_adapter.httpx.get", return_value=resp):
+        res = client.post("/api/reels", json={
+            "url": "https://arxiv.org/abs/2005.14165"})
+    assert res.status_code == 200
+    rid = res.json()["reel_id"]
+    db = sqlite3.connect(str(tmp_db))
+    title = db.execute("SELECT title FROM reels WHERE id=?", (rid,)).fetchone()[0]
+    db.close()
+    assert title == "Language Models are Few-Shot Learners"
+
+
 def test_stage_media_and_transcribe_skip_for_text(tmp_db, sample_user):
     """Worker stages must no-op (not fail) when run for a text reel."""
     from app.db.schema import get_db

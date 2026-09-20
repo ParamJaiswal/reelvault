@@ -50,15 +50,20 @@ class PaperAdapter(IngestionAdapter):
         if arxiv_id:
             try:
                 r = httpx.get(
-                    f"http://export.arxiv.org/api/query?id_list={arxiv_id}",
-                    timeout=15)
+                    f"https://export.arxiv.org/api/query?id_list={arxiv_id}",
+                    timeout=15, follow_redirects=True)
                 r.raise_for_status()
                 xml = r.text
-                t = re.search(r"<title>(.*?)</title>", xml, re.S)
-                a = re.search(r"<summary>(.*?)</summary>", xml, re.S)
-                title = re.sub(r"\s+", " ", t.group(1)).strip() if t else ""
-                abstract = re.sub(r"\s+", " ", a.group(1)).strip() if a else ""
-                auth_tags = re.findall(r"<name>(.*?)</name>", xml)
+                # The Atom feed's top-level <title> is feed metadata ("arXiv
+                # Query: ..."), not the paper title — parse inside <entry>.
+                import html as _html
+                entry = re.search(r"<entry>(.*?)</entry>", xml, re.S)
+                entry = entry.group(1) if entry else xml
+                t = re.search(r"<title>(.*?)</title>", entry, re.S)
+                a = re.search(r"<summary>(.*?)</summary>", entry, re.S)
+                title = _html.unescape(re.sub(r"\s+", " ", t.group(1))).strip() if t else ""
+                abstract = _html.unescape(re.sub(r"\s+", " ", a.group(1))).strip() if a else ""
+                auth_tags = re.findall(r"<name>(.*?)</name>", entry)
                 authors = ", ".join(auth_tags[:5])
                 pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
             except Exception as e:

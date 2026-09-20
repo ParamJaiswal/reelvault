@@ -139,13 +139,16 @@ def create_reel_from_request(uid: int, req: IngestRequest) -> dict:
                         "reel_id": dup["id"], "status": dup["status"]}
 
         content_kind = resolved.get("content_kind", "video")
+        # Adapter-supplied title (arXiv/article/X) wins over request meta.
+        title = (resolved.get("meta", {}).get("title")
+                 or req.meta.get("title") or "")[:120]
         cur = db.execute(
             "INSERT INTO reels(user_id, source_kind, source_url, shortcode,"
             " caption, author_handle, media_path, title, content_kind)"
             " VALUES (?,?,?,?,?,?,?,?,?)",
             (uid, req.kind, resolved.get("source_url"), shortcode,
              resolved.get("caption") or "", resolved.get("author_handle") or "",
-             resolved.get("media_path"), (req.meta.get("title") or "")[:120],
+             resolved.get("media_path"), title,
              content_kind))
         reel_id = cur.lastrowid
         # Store document body in same transaction as reel insert
