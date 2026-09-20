@@ -182,7 +182,7 @@ class TaskRouter:
         served_by = "qwen"
         for attempt in range(2):  # one strict retry on parse failure
             raw = llm.chat(messages, max_tokens=120,
-                           temperature=0.1 if attempt == 0 else 0.4,
+                           temperature=0,
                            json_mode=True, reel_id=reel_id)
             try:
                 obj = json.loads(raw)
@@ -285,7 +285,7 @@ class TaskRouter:
         raw = llm.chat(
             [{"role": "system", "content": sys_p},
              {"role": "user", "content": unified_text[:7000]}],
-            max_tokens=settings.llm_max_tokens, temperature=0.15,
+            max_tokens=settings.llm_max_tokens, temperature=0,
             json_mode=True, reel_id=reel_id)
         try:
             return json.loads(raw)

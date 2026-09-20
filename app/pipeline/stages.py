@@ -32,7 +32,7 @@ URL_RE = re.compile(r"https?://[^\s\"'>)]+")
 PHONE_RE = re.compile(r"(?:\+91[- ]?)?[6-9]\d{9}\b")
 SKILL_HINTS = ["python", "sql", "excel", "power bi", "tableau", "machine learning",
                "deep learning", "nlp", "pandas", "numpy", "react", "java",
-               "aws", "docker", "git", "communication"]
+               "aws", "docker", "git", "communication", "linkedin"]
 
 # Whisper hallucination guard: the transcriber exposes per-segment
 # no_speech_prob and avg_logprob; segments that are simultaneously likely
@@ -385,6 +385,19 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
             "field": "email", "value": em,
             "evidence_source": "caption" if em in caption else "transcript",
             "evidence_quote": em, "evidence_t_s": None, "confidence": 0.95,
+        })
+    # Deterministic platform/skill recovery (Phase 7):
+    # pre["skills"] was computed but never persisted. Now matched
+    # platform/tool names become evidence-gated facts so skills
+    # mentioned on-screen are searchable without model effort.
+    for sk in pre["skills"]:
+        verified_facts.append({
+            "schema_type": schema_type if schema_type != "generic" else "note",
+            "field": "technologies", "value": sk,
+            "evidence_source": "transcript",
+            "evidence_quote": sk,
+            "evidence_t_s": None,
+            "confidence": 0.95,
         })
 
     overall_conf = (
