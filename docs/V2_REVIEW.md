@@ -52,9 +52,8 @@ complete, gated on real-LLM run + owner approval for new deps.
 
 ## Known gaps (honest, not blockers)
 
-- No real-LLM run of X post/paper end-to-end yet — needs llama-server up;
-  eval policy (§9) requires measuring before trusting extraction quality on
-  text sources. Golden set has no text-source rows yet.
+- Text-source extraction quality unmeasured — live run shows aggressive
+  dropping (1/8 facts kept on GPT-3 abstract). Golden set needed (§9).
 - PDF text extraction not added (pypdf/pdfplumber need owner approval).
   `evidence_page` plumbing ready. Page locators stay NULL until then.
 - X video/photo downloads: media URLs stored in meta but not fetched;
@@ -70,10 +69,35 @@ complete, gated on real-LLM run + owner approval for new deps.
 22 files, +~1900/−40 vs main. New: 4 adapters, documents table, STAGE_PLANS,
 OpenAICompatProvider, shadow table, 63 new tests. Schema v6→v9, forward-only.
 
+## Live test (2026-09-21, real services + real Qwen)
+
+Restarted server on v2 code; ingested real arXiv papers (1706.03762,
+2005.14165) and a real X post (x.com/jack/status/20) through the API.
+
+Working live: routing, documents storage, kind-aware plans (ocr/classify/
+embed/finalize only), clean titles after fix, summaries, categories,
+document-evidenced facts, FTS search via POST /api/search, delete purges
+FTS+shadow.
+
+Bugs found by live test, fixed + regression-tested (commit 24d3b8d):
+1. arXiv http→https 301 broke lookup (follow_redirects added).
+2. Feed-level `<title>` junk polluted title/body (parse inside `<entry>`,
+   unescape entities).
+3. Adapter title never persisted (create_reel read req.meta, not resolved).
+4. Media-bearing tweets enqueued ingest → failure path clobbers documents
+   (ingest stage now video-only).
+
+Open quality finding (not a crash): on a clean GPT-3 abstract the ledger
+kept 1/8 facts — the 3B model paraphrases quotes below the 0.45 similarity
+floor. Dropping wrong facts is correct behavior; recall is the known
+evidence-matcher tension (§2 of the challenges doc). Text sources need
+golden-set rows + calibration before extraction quality can be claimed.
+
 ## Next (single ordered list)
 
-1. Restart app → paste real X post + arXiv DOI → verify notes + click-to-quote.
-2. One text-source golden-set row per kind, measure extraction (§9 gate).
-3. Owner: approve trafilatura + pypdf → swap in real extraction.
-4. Tweet media / PDF OCR pass with page locators.
+1. One text-source golden-set row per kind; calibrate matcher on text spans
+   (paragraph granularity may need sentence-level chunks).
+2. Owner: approve trafilatura + pypdf → swap in real extraction.
+3. Tweet media / PDF OCR pass with page locators.
+4. Try cloud LLM seam (Groq/Gemini) for text extraction quality A/B.
 5. Android: unfreeze only when intake pain appears; PDF/image share intents.
