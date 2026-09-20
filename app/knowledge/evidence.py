@@ -89,7 +89,8 @@ def norm(text: str) -> str:
 class SourceSpan:
     text: str
     t_s: float | None
-    source: str            # transcript | ocr | caption | metadata
+    source: str            # transcript | ocr | caption | metadata | document
+    page: int | None = None  # page number for PDF/document sources
 
 
 @dataclass

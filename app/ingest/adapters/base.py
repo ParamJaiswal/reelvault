@@ -188,6 +188,11 @@ def _ensure_v2_adapters() -> None:
         ADAPTERS.insert(0, PaperAdapter())
     except ImportError:
         pass
+    try:
+        from app.ingest.adapters.linkedin_adapter import LinkedInAdapter
+        ADAPTERS.insert(0, LinkedInAdapter())
+    except ImportError:
+        pass
 
 
 def route(req: IngestRequest) -> tuple[IngestionAdapter, dict[str, Any]]:

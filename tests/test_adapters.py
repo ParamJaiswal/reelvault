@@ -220,3 +220,72 @@ def test_paper_adapter_registered():
     _ensure_v2_adapters()
     names = [a.name for a in ADAPTERS]
     assert "paper" in names
+
+
+def test_linkedin_adapter_matches_post_url():
+    from app.ingest.adapters.linkedin_adapter import LinkedInAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = LinkedInAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="https://www.linkedin.com/posts/user-some-1234567890-abcd")
+    assert a.matches(req) is True
+
+
+def test_linkedin_adapter_matches_activity_url():
+    from app.ingest.adapters.linkedin_adapter import LinkedInAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = LinkedInAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="https://www.linkedin.com/feed/update/urn:li:activity:9876543210")
+    assert a.matches(req) is True
+
+
+def test_linkedin_adapter_rejects_non_linkedin():
+    from app.ingest.adapters.linkedin_adapter import LinkedInAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = LinkedInAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="https://example.com/post/123")
+    assert a.matches(req) is False
+
+
+def test_linkedin_text_fallback_returns_content_kind():
+    from app.ingest.adapters.linkedin_adapter import LinkedInAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = LinkedInAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="https://www.linkedin.com/posts/user-1234567890-abcd",
+                        caption="Great insights on AI safety")
+    # yt-dlp will fail on this fake URL, so fallback path runs
+    result = a.resolve(req)
+    assert result["content_kind"] == "linkedin_post"
+    assert result["shortcode"] == "1234567890"
+
+
+def test_linkedin_adapter_registered():
+    from app.ingest.adapters.base import ADAPTERS, _ensure_v2_adapters
+    _ensure_v2_adapters()
+    names = [a.name for a in ADAPTERS]
+    assert "linkedin_post" in names
+
+
+def test_build_spans_includes_document_body():
+    """build_spans creates document-source spans from doc body text."""
+    from app.pipeline.stages import build_spans
+    spans = build_spans([], [], "", "First paragraph.\n\nSecond paragraph.")
+    doc_spans = [s for s in spans if s.source == "document"]
+    assert len(doc_spans) == 2
+    assert doc_spans[0].text == "First paragraph."
+    assert doc_spans[1].text == "Second paragraph."
+    assert doc_spans[0].t_s is None
+    assert doc_spans[0].page is None
+
+
+def test_source_span_has_page_field():
+    """SourceSpan supports page locator for PDF sources."""
+    from app.knowledge.evidence import SourceSpan
+    span = SourceSpan(text="test", t_s=None, source="document", page=3)
+    assert span.page == 3
+    # Default is None for backward compat
+    span2 = SourceSpan(text="test", t_s=1.0, source="transcript")
+    assert span2.page is None

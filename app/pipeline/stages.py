@@ -329,14 +329,20 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
         ocrs = [dict(r) for r in db.execute(
             "SELECT t_s, text FROM ocr_results WHERE reel_id=? ORDER BY t_s",
             (reel_id,))]
+        doc_row = db.execute(
+            "SELECT body_text FROM documents WHERE reel_id=? LIMIT 1",
+            (reel_id,)).fetchone()
+    doc_body = doc_row["body_text"] if doc_row else ""
     caption = reel["caption"] or ""
     transcript = "\n".join(f"[{fmt_ts(s['start_s'])}] {s['text']}" for s in segs)
     overlay = "\n".join(f"[{fmt_ts(o['t_s'])}] OCR: {o['text']}" for o in ocrs)
 
     unified = f"CAPTION: {caption}\n\nTRANSCRIPT:\n{transcript or '(no speech detected)'}\n\nON-SCREEN TEXT:\n{overlay or '(none)'}"
+    if doc_body:
+        unified += f"\n\nDOCUMENT:\n{doc_body[:10000]}"
 
     # ------- Evidence Ledger verification -------
-    spans = build_spans(segs, ocrs, caption)
+    spans = build_spans(segs, ocrs, caption, doc_body)
 
     # ------- regex pre-pass (cheap deterministic extraction) -------
     pre = {
@@ -689,12 +695,18 @@ def safe_json(raw: str, fallback: dict) -> dict:
     return fallback
 
 
-def build_spans(segs, ocrs, caption) -> list[SourceSpan]:
+def build_spans(segs, ocrs, caption, doc_body: str = "") -> list[SourceSpan]:
     spans = [SourceSpan(text=s["text"], t_s=s["start_s"], source="transcript")
              for s in segs]
     spans += [SourceSpan(text=o["text"], t_s=o["t_s"], source="ocr") for o in ocrs]
     if caption:
         spans.append(SourceSpan(text=caption, t_s=None, source="caption"))
+    if doc_body:
+        # Split document into paragraph-sized chunks for evidence matching.
+        # Each chunk gets page=None (page locators added when PDF OCR runs).
+        paragraphs = [p.strip() for p in doc_body.split("\n\n") if p.strip()]
+        for para in paragraphs:
+            spans.append(SourceSpan(text=para, t_s=None, source="document"))
     return spans
 
 
