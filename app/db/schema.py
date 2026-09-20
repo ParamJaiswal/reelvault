@@ -17,7 +17,7 @@ from typing import Any, Iterator
 
 from app.core.config import settings
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -335,6 +335,36 @@ MIGRATIONS: dict[int, str] = {
         title TEXT, summary TEXT, caption TEXT, author_handle TEXT,
         facts_text TEXT, transcript_text TEXT, ocr_text TEXT
     );
+    """,
+    9: """
+    -- facts must accept evidence from document bodies (v2 text sources) and
+    -- carry a page locator for PDFs. SQLite can't ALTER a CHECK — rebuild.
+    CREATE TABLE facts_new (
+        id INTEGER PRIMARY KEY,
+        reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+        schema_type TEXT NOT NULL,
+        field TEXT NOT NULL,
+        value TEXT NOT NULL,
+        normalized_value TEXT,
+        evidence_source TEXT NOT NULL DEFAULT 'transcript'
+            CHECK(evidence_source IN ('transcript','ocr','vision','metadata','caption','assistant','document')),
+        evidence_quote TEXT,
+        evidence_t_s REAL,
+        evidence_page INTEGER,
+        confidence REAL NOT NULL DEFAULT 0.5,
+        user_corrected INTEGER NOT NULL DEFAULT 0,
+        ai_value TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO facts_new SELECT id, reel_id, schema_type, field, value,
+        normalized_value, evidence_source, evidence_quote, evidence_t_s,
+        NULL, confidence, user_corrected, ai_value, created_at, updated_at
+        FROM facts;
+    DROP TABLE facts;
+    ALTER TABLE facts_new RENAME TO facts;
+    CREATE INDEX idx_facts_reel ON facts(reel_id);
+    CREATE INDEX idx_facts_field ON facts(schema_type, field);
     """,
 }
 

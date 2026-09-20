@@ -1048,3 +1048,44 @@ Next:
 - Owner: fix the jev key so the gate can clear this diff, then authorize the
   commit. Then Phase 8B.1 (predicted-schema end-to-end metric), justified by
   the 5/16 live schema mismatches now recorded in docs/EVAL.md.
+
+---
+
+Date: 2026-09-21
+Phase: v2 foundation (multi-source)
+Done:
+- Preserved v0.1: committed Phase 8A/8C on v0-core, created main, tagged
+  v0.1.0, bundle at D:/reelvault-backups/reelvault-v0.1.0.bundle, pushed all
+  to https://github.com/ParamJaiswal/reelvault.git (main + v0-core + tags).
+- v2 branch built (e79146a, 5e94600, 9b5a799, + this commit):
+  1. Backup restore verified into clean temp dir (integrity ok, FTS live).
+  2. RV_LLM_BACKEND swap seam: OpenAICompatProvider + get_llm() routing.
+  3. Contentless FTS5 widened to facts/transcript/OCR/document body;
+     reels_fts_shadow table (v8) fixes contentless-delete bloat.
+  4. Kind-aware pipeline: content_kind column (v7), STAGE_PLANS in queue,
+     media/transcribe self-skip for text reels, documents table.
+  5. Adapters: X (syndication CDN), article (SSRF-guarded), paper
+     (arXiv + OpenAlex), LinkedIn (yt-dlp + text fallback); lazy-registered,
+     IG routing regression-tested.
+  6. Evidence: SourceSpan.page, facts CHECK + 'document' + evidence_page
+     (v9, table rebuild verified lossless on copied live DB v5→v9).
+  7. Review pass (cavecrew): fixed FTS shadow, SSRF, Bearer/API-key
+     redaction in ai_runs, transactional document insert, truncation align.
+- docs/INGESTION.md written (dangling reference from base.py now real).
+Verification:
+- 286 passed, 2 skipped (full suite minus gated AI eval) on v2.
+- Live-DB rehearsal: copy of data/reelvault.db v5→v9: 21 reels, 88 facts
+  preserved, integrity ok, FTS 21 rows, search hits 8, all content_kind=video.
+- E2E (tests/test_v2_e2e.py): X ingest → document → kind-aware job plan (no
+  media/transcribe jobs), document-evidenced fact searchable, IG URLs still
+  route to IG adapters, stages self-skip at runtime.
+Blockers:
+- Jev gate still unrun (key never reaches process) — owner waived this
+  session; cavecrew reviewer used instead.
+- trafilatura not installed (needs owner approval as new dependency);
+  article adapter falls back to basic HTML extraction until then.
+- PDF text extraction (pypdf/pdfplumber) not added: new dependency, needs
+  owner approval. evidence_page plumbing is in place for it.
+Next:
+- Install llama-server, run one real X post + one real paper URL through the
+  full pipeline on live data; then golden-set entries per new kind.

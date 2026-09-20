@@ -35,7 +35,7 @@ def _is_safe_url(url: str) -> bool:
 
 # Domains we don't try to ingest (social platforms have their own adapters)
 SKIP_DOMAINS = {
-    "instagram.com", "www.instagram.com",
+    "instagram.com", "www.instagram.com", "instagr.am",
     "twitter.com", "x.com",
     "linkedin.com", "www.linkedin.com",
     "youtube.com", "www.youtube.com",

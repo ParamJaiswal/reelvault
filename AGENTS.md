@@ -1,7 +1,7 @@
 ## ReelVault — Agent Guidance
 
-**Last updated:** September 6, 2026  
-**Active milestone:** `v0.1` — useful local personal prototype
+**Last updated:** September 21, 2026  
+**Active milestone:** `v0.1` on `main` (tagged `v0.1.0`, frozen; bugfixes only) — `v2` branch develops multi-source ingestion (X/articles/papers/LinkedIn; see `docs/INGESTION.md`). Every v2 merge must keep the v0.1 suite green; `content_kind` defaults to `video` and `RV_LLM_BACKEND` defaults to local so v0.1 behavior is preserved by construction.
 
 Read this file before changing code. Then read `docs/SESSION_HANDOFF.md` for the latest verified session state.
 

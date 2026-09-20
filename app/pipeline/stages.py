@@ -408,6 +408,7 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
             "evidence_source": (m.span.source if m.span else "transcript"),
             "evidence_quote": (m.span.text[:400] if m.span else quote),
             "evidence_t_s": m.span.t_s if m.span else None,
+            "evidence_page": m.span.page if m.span else None,
             "confidence": conf,
         })
     # regex-anchored facts always pass (deterministic evidence)
@@ -472,11 +473,11 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
         for f in verified_facts:
             db.execute(
                 "INSERT INTO facts(reel_id, schema_type, field, value,"
-                " evidence_source, evidence_quote, evidence_t_s, confidence)"
-                " VALUES (?,?,?,?,?,?,?,?)",
+                " evidence_source, evidence_quote, evidence_t_s, evidence_page, confidence)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
                 (reel_id, f["schema_type"], f["field"], f["value"],
                  f["evidence_source"], f["evidence_quote"], f["evidence_t_s"],
-                 f["confidence"]))
+                 f.get("evidence_page"), f["confidence"]))
         for ent in (extraction.get("entities") or [])[:12]:
             name = (ent.get("name") or "").strip()[:80]
             kind = (ent.get("kind") or "other").strip().lower()[:30]

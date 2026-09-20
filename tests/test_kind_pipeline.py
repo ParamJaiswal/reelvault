@@ -102,3 +102,61 @@ def test_document_body_indexed_in_fts(tmp_db):
     ).fetchone()[0]
     db.close()
     assert hits >= 1
+
+
+def test_facts_accept_document_evidence_source(tmp_db):
+    """Migration 9: facts CHECK allows 'document' + evidence_page column."""
+    from app.db.schema import get_db
+
+    with get_db() as db:
+        uid = db.execute(
+            "INSERT INTO users(username, display_name, api_key_hash)"
+            " VALUES('u','U','')").lastrowid
+        rid = db.execute(
+            "INSERT INTO reels(user_id, source_kind, content_kind)"
+            " VALUES(?,'url','paper')", (uid,)).lastrowid
+        db.execute(
+            "INSERT INTO facts(reel_id, schema_type, field, value,"
+            " evidence_source, evidence_quote, evidence_page, confidence)"
+            " VALUES(?,'education','topic','attention','document',"
+            " 'the attention mechanism...', 3, 0.8)", (rid,))
+        row = db.execute(
+            "SELECT evidence_source, evidence_page FROM facts WHERE reel_id=?",
+            (rid,)).fetchone()
+    assert row["evidence_source"] == "document"
+    assert row["evidence_page"] == 3
+
+
+def test_migration_v9_preserves_existing_facts(tmp_path):
+    """Upgrading a v8 DB with facts keeps all rows + adds evidence_page."""
+    import sqlite3
+    from app.db.schema import MIGRATIONS, migrate
+
+    db_file = tmp_path / "v8.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations"
+                 "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL"
+                 " DEFAULT (datetime('now')))")
+    for v in range(1, 9):
+        conn.executescript(MIGRATIONS[v])
+        conn.execute("INSERT INTO schema_migrations(version) VALUES (?)", (v,))
+    conn.execute("INSERT INTO users(id, username, api_key_hash) VALUES (1,'o','')")
+    conn.execute("INSERT INTO reels(id, user_id, source_kind)"
+                 " VALUES (5,1,'file')")
+    conn.execute(
+        "INSERT INTO facts(id, reel_id, schema_type, field, value,"
+        " evidence_source, confidence) VALUES (9,5,'job','company','Acme',"
+        " 'transcript', 0.7)")
+    conn.commit()
+    conn.close()
+
+    assert migrate(db_file) == 9
+
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM facts WHERE id=9").fetchone()
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(facts)")}
+    conn.close()
+    assert row["value"] == "Acme"
+    assert row["evidence_page"] is None
+    assert "evidence_page" in cols
