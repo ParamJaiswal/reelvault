@@ -266,3 +266,28 @@ def confidence_score(match_sim: float, n_agree: int,
 
 
 HALLUCINATION_THRESHOLD = 0.45
+
+# A summary at or above this grounding ratio is presented as source-grounded.
+# Calibrated on the 21 real Phase-6 reels (docs/EVAL.md): median ratio 0.909,
+# so requiring 1.0 would flag 13/21 summaries as unverified and teach the
+# user to ignore the marker. 0.80 flags 6/21 — the loose tail, including a
+# reel whose summary shared zero terms with its 4 OCR lines.
+SUMMARY_GROUNDING_MIN = 0.80
+
+
+def grounding_ratio(text: str, spans: list[SourceSpan]) -> float:
+    """Share of `text`'s claim terms that occur anywhere in `spans`.
+
+    Used for abstractive prose (the reel summary), which cannot carry a
+    single verbatim quote the way a fact can. Lexical grounding only: a low
+    score says the wording is not traceable to the source, and a high score
+    does NOT prove the claim is true. Grounded in measured distribution —
+    see docs/EVAL.md (real-reel median 0.909, so strict 1.0 is unusable).
+    """
+    terms = _claim_terms(text)
+    if not terms:
+        return 0.0
+    pool: set[str] = set()
+    for sp in spans:
+        pool |= _claim_terms(sp.text)
+    return round(len(terms & pool) / len(terms), 3)

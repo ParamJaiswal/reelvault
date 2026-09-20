@@ -402,6 +402,7 @@ function detailHTML(r) {
     <span class="meter"><i style="width:${fmtPct(r.confidence)}%"></i></span></div>
 
   <div class="sec"><h4>AI Summary
+    ${r.summary_verified === false ? `<span class="chip warn" title="Model wording whose terms are not well traceable to the transcript, OCR or caption. Check the evidence below before relying on it.">not source-checked</span>` : ""}
     <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="editSummary()">✏️ edit</button></h4>
     <p style="margin:0">${esc(r.summary || "—")}</p></div>
 

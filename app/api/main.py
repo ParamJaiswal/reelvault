@@ -23,6 +23,7 @@ from app.db.schema import connect, get_db, migrate
 from app.ingest.adapters.base import (IngestRequest, parse_shortcode,
                                       route, normalize_instagram_url)
 from app.knowledge import assistant as assist
+from app.knowledge.evidence import SUMMARY_GROUNDING_MIN, grounding_ratio
 from app.knowledge.search import hybrid_search, keyword_search
 from app.pipeline import stages as stg
 from app.pipeline.media import resolve_media_path
@@ -278,6 +279,11 @@ def reel_card(r) -> dict:
     d["categories"] = json.loads(d.pop("categories_json") or "[]")
     d["key_takeaways"] = json.loads(d.pop("key_takeaways_json") or "[]")
     d["action_items"] = json.loads(d.pop("action_items_json") or "[]")
+    # Derived here so the threshold lives in one place: the stored value is a
+    # measurement, the verdict is policy. summary_grounding NULL (older rows)
+    # is reported as not-verified because it was, in fact, never checked.
+    g = d.get("summary_grounding")
+    d["summary_verified"] = g is not None and g >= SUMMARY_GROUNDING_MIN
     return d
 
 
@@ -407,6 +413,24 @@ def patch_reel(reel_id: int, body: ReelPatch,
                 cats.append(norm)
         fields["categories_json"] = json.dumps(cats[:6])
         del fields["categories"]
+    if "summary" in fields:
+        # A hand-edited summary is still prose about the reel: re-measure it
+        # against the stored source so the marker reflects what is on disk
+        # rather than trusting that a correction happened to be grounded.
+        txt = (fields["summary"] or "").strip()
+        with get_db() as db:
+            own = db.execute("SELECT caption FROM reels WHERE id=? AND user_id=?",
+                             (reel_id, uid)).fetchone()
+            if own is None:
+                raise HTTPException(404, "Reel not found")
+            segs = [dict(x) for x in db.execute(
+                "SELECT start_s, text FROM transcript_segments WHERE reel_id=?"
+                " ORDER BY start_s", (reel_id,))]
+            ocrs = [dict(x) for x in db.execute(
+                "SELECT t_s, text FROM ocr_results WHERE reel_id=?"
+                " ORDER BY t_s", (reel_id,))]
+        fields["summary_grounding"] = grounding_ratio(
+            txt, stg.build_spans(segs, ocrs, own["caption"] or "")) if txt else None
     if not fields:
         raise HTTPException(422, "nothing to update")
     sets = ", ".join(f"{k}=?" for k in fields)

@@ -526,3 +526,124 @@ Next:
 ```
 
 Do not state that a feature works unless the verification command or test result is recorded.
+
+
+## AI Engineering Workflow
+
+### Roles
+
+The primary coding agent is responsible for:
+- repository investigation
+- implementation
+- refactoring
+- test execution
+- debugging
+- documentation
+
+Jev is the project's judgment and verification layer.
+
+Jev must not be treated as the code generator.
+
+### Change Discipline
+
+Before changing code:
+1. Read the relevant architecture and existing tests.
+2. Identify the exact requirement being addressed.
+3. Inspect related code paths.
+4. State the smallest safe implementation plan.
+5. Do not introduce unrelated refactors or dependencies.
+
+### Implementation
+
+During implementation:
+1. Prefer the smallest change that satisfies the requirement.
+2. Preserve existing architecture unless the task explicitly authorizes architectural change.
+3. Add or update tests for behavioral changes.
+4. Run targeted tests before broader tests.
+5. Inspect the resulting Git diff.
+
+### Jev Review Gate
+
+Before declaring any implementation complete:
+
+1. Run relevant tests.
+2. Capture the actual test output as evidence.
+3. Inspect the final Git diff.
+4. Call `jev_review` with:
+   - the original request
+   - the relevant diff
+5. If completion claims are made, call `jev_verify` or `jev_gate`
+   using actual command output as evidence.
+6. Do not claim tests passed unless the captured evidence shows they passed.
+7. Do not declare completion when Jev identifies an unresolved issue that affects correctness, scope, or safety.
+
+### Completion
+
+A task is complete only when:
+- implementation is present
+- relevant tests pass
+- no known regression is introduced
+- final diff matches the requested scope
+- completion claims are backed by evidence
+- Jev review/gate has been run for substantive changes
+
+### Escalation
+
+Jev is advisory, not absolute.
+
+If Jev returns:
+- low confidence
+- incomplete context
+- contradictory evidence
+- review required
+
+then the coding agent must inspect the issue and either:
+- resolve it, or
+- explicitly report it to the owner.
+
+Never override a Jev result merely to obtain a passing gate.
+
+### Scope Protection
+
+Do NOT:
+- replace the queue architecture
+- replace the model
+- remove authentication architecture
+- add dependencies without necessity
+- rewrite unrelated modules
+- chase accepted limitations unless the owner explicitly requests it
+
+---
+
+## Ponytail — Minimal Code Discipline
+
+Adapted from [github.com/DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail). Applies to all code changes in this repo.
+
+Before writing any code, stop at the first rung that holds:
+
+1. Does this need to be built at all? (YAGNI)
+2. Does it already exist in this codebase? Reuse the helper, util, or pattern that's already here.
+3. Does the standard library already do this? Use it.
+4. Does a native platform feature cover it? Use it.
+5. Does an already-installed dependency solve it? Use it.
+6. Can this be one line? Make it one line.
+7. Only then: write the minimum code that works.
+
+The ladder runs after you understand the problem, not instead of it: read the task and the code it touches, trace the real flow end to end, then climb.
+
+Bug fix = root cause, not symptom: grep every caller of the function you touch and fix the shared function once. One guard there is a smaller diff than one per caller.
+
+### Rules
+
+- No abstractions that weren't explicitly requested.
+- No new dependency if it can be avoided.
+- No boilerplate nobody asked for.
+- Deletion over addition. Boring over clever. Fewest files possible.
+- Shortest working diff wins, but only once you understand the problem.
+- Question complex requests: "Do you actually need X, or does Y cover it?"
+- Pick the edge-case-correct option when two stdlib approaches are the same size.
+- Mark deliberate simplifications with a `ponytail:` comment naming the ceiling and upgrade path.
+
+### Not lazy about
+
+Understanding the problem, input validation at trust boundaries, error handling that prevents data loss, security, accessibility, hardware calibration, anything explicitly requested. Non-trivial logic leaves ONE runnable check behind. Trivial one-liners need no test.

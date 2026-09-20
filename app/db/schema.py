@@ -17,7 +17,7 @@ from typing import Any, Iterator
 
 from app.core.config import settings
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -282,6 +282,15 @@ MIGRATIONS: dict[int, str] = {
         user_agent TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    """,
+    5: """
+    -- Summary grounding. AGENTS.md sec.8 requires every model claim to be
+    -- source-supported, but reels.summary is abstractive prose and was
+    -- persisted unchecked (and indexed into reels_fts by migration 2).
+    -- Ratio of the summary's claim terms found in the source spans; NULL
+    -- means never measured (every pre-v5 row, including user-written ones
+    -- until they are re-saved).
+    ALTER TABLE reels ADD COLUMN summary_grounding REAL;
     """,
 }
 

@@ -17,7 +17,8 @@ from app.core.config import settings
 from app.db.queue import Queue
 from app.db.schema import get_db
 from app.knowledge.evidence import (HALLUCINATION_THRESHOLD, SourceSpan,
-                                    confidence_score, find_evidence)
+                                    confidence_score, find_evidence,
+                                    grounding_ratio)
 from app.knowledge.schemas import SCHEMA_FIELDS
 from app.pipeline.fetch import FetchError, download_reel
 from app.pipeline.media import (MediaError, PermanentMediaError,
@@ -33,6 +34,11 @@ PHONE_RE = re.compile(r"(?:\+91[- ]?)?[6-9]\d{9}\b")
 SKILL_HINTS = ["python", "sql", "excel", "power bi", "tableau", "machine learning",
                "deep learning", "nlp", "pandas", "numpy", "react", "java",
                "aws", "docker", "git", "communication", "linkedin"]
+# Whole-token matchers for the hints above. Letters and digits are the only
+# word characters, so "pythonic" and "digital" cannot smuggle in python/git
+# while "python-based" still counts as a mention.
+SKILL_RES = {sk: re.compile(r"(?<![a-z0-9])" + re.escape(sk) + r"(?![a-z0-9])")
+             for sk in SKILL_HINTS}
 
 # Whisper hallucination guard: the transcriber exposes per-segment
 # no_speech_prob and avg_logprob; segments that are simultaneously likely
@@ -318,13 +324,31 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
 
     unified = f"CAPTION: {caption}\n\nTRANSCRIPT:\n{transcript or '(no speech detected)'}\n\nON-SCREEN TEXT:\n{overlay or '(none)'}"
 
+    # ------- Evidence Ledger verification -------
+    spans = build_spans(segs, ocrs, caption)
+
     # ------- regex pre-pass (cheap deterministic extraction) -------
     pre = {
         "emails": sorted(set(EMAIL_RE.findall(unified)))[:4],
         "urls": sorted(set(URL_RE.findall(unified)))[:4],
         "phones": sorted(set(PHONE_RE.findall(unified)))[:3],
-        "skills": [sk for sk in SKILL_HINTS if sk in unified.lower()],
+        "skills": [],  # filled below with span attribution
     }
+    # Word-boundary skill matching with source-span attribution.
+    # Each skill must appear as a whole word/token in some source span;
+    # false positives like "pythonic"→python or "digital"→git are rejected.
+    # Each entry pairs the matched name with the SourceSpan that contained
+    # it, so evidence_source/quote/t_s come from real source data, not a
+    # hardcoded "transcript" guess. build_spans orders transcript → ocr →
+    # caption, so a term that is both spoken and captioned keeps the
+    # timestamped span and stays click-to-seek in the UI.
+    seen_skills: set[str] = set()
+    for sp in spans:
+        sn = sp.text.lower()
+        for sk, pat in SKILL_RES.items():
+            if sk not in seen_skills and pat.search(sn):
+                pre["skills"].append((sk, sp))
+                seen_skills.add(sk)
 
     # ------- SLM classification + schema selection + extraction -------
     from app.ai.router import get_router
@@ -342,9 +366,8 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
     extraction = router.extract(unified, schema_type, reel_id=reel_id)
     if not extraction:
         raise ValueError("SLM returned unparseable JSON twice")
+    raw_summary = extraction.get("summary") or ""
 
-    # ------- Evidence Ledger verification -------
-    spans = build_spans(segs, ocrs, caption)
     verified_facts = []
     dropped = []
     for f in extraction.get("facts", []):
@@ -387,16 +410,17 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
             "evidence_quote": em, "evidence_t_s": None, "confidence": 0.95,
         })
     # Deterministic platform/skill recovery (Phase 7):
-    # pre["skills"] was computed but never persisted. Now matched
-    # platform/tool names become evidence-gated facts so skills
-    # mentioned on-screen are searchable without model effort.
-    for sk in pre["skills"]:
+    # pre["skills"] now carries (name, SourceSpan) pairs from word-boundary
+    # matching. Each becomes an evidence-gated fact with correct source,
+    # quote and timestamp — no more "transcript" guesswork or substring
+    # false positives ("pythonic"→python, "digital"→git).
+    for sk, sp in pre["skills"]:
         verified_facts.append({
             "schema_type": schema_type if schema_type != "generic" else "note",
             "field": "technologies", "value": sk,
-            "evidence_source": "transcript",
-            "evidence_quote": sk,
-            "evidence_t_s": None,
+            "evidence_source": sp.source,
+            "evidence_quote": sp.text[:400],
+            "evidence_t_s": sp.t_s,
             "confidence": 0.95,
         })
 
@@ -418,7 +442,9 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
 
     with get_db() as db:
         set_reel(db, reel_id,
-                 summary=(extraction.get("summary") or "")[:1500],
+                 summary=raw_summary[:1500],
+                 summary_grounding=grounding_ratio(raw_summary, spans)
+                 if raw_summary.strip() else None,
                  key_takeaways_json=json.dumps(extraction.get("key_takeaways", [])[:8]),
                  action_items_json=json.dumps(extraction.get("action_items", [])[:8]),
                  categories_json=json.dumps(cats or ["Other"]),

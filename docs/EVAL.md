@@ -54,6 +54,111 @@ Each item has two category label sets:
 
 `min_facts_kept` is the floor of evidence-kept facts expected per item.
 
+## September 20, 2026 — live golden run after the Phase 8A changes
+
+llama-server restarted on :8091 and `RV_EVAL_TRACE=1 pytest tests/test_ai_eval.py -q -s`
+executed: **1 passed in 118.03 s**, 16 cases, all served by `qwen`, 0 malformed.
+Private trace: `D:/Temp/user/rv_test_zynbd73x/eval_results.json` (not committed).
+
+| Metric v2 | This run | Recorded band for the same checkpoint |
+|---|---:|---:|
+| Kept-fact named-field recall | 0.810 (17/21) | 0.714 / 0.714 / 0.762 / 0.810 |
+| Deadline parse recall | 1.000 (4/4) | 0.75 / 0.75 / 1.00 |
+| Unsupported-kept heuristic | 0.036 (2/55) | 0.019 / 0.038 / 0.055 |
+| Minimum-kept rate | 0.875 | 0.875 / 0.938 |
+| Category multilabel / macro-F1 | 0.750 / 0.509 | 0.750 / 0.509 |
+| Schema agreement | 0.688 | 0.688 |
+| Mean classify + extract latency | 7.32 s | 9.34 s |
+
+No regression: every gate passes and the two varying metrics (recall, deadline)
+land at the **top** of the previously measured spread, not above it — the
+variance study already established that this checkpoint swings this far at
+temperature 0, so a single run cannot claim an improvement either.
+
+**What the run confirmed about the harness, not the model.** `extraction_schema_mode`
+is still `"expected"`: the benchmark feeds each fixture its gold schema, while the
+classifier actually agreed on the schema in only 11/16 cases. The five live
+mismatches are edu-04 (predicted `job`, gold `generic`), scholarship-01
+(`education` vs `job`), and fitness-01 / hinglish-01 / recipe-01 (`education` vs
+`generic`). In production those reels are extracted against a different field set
+than the one being scored, so the recall number above is an upper bound on
+routing-correct cases only. This is the concrete justification for Phase 8B.1.
+
+Model field-name violations are still reported separately rather than absorbed:
+edu-03 emitted `deadline`, edu-05 emitted `company` and `experience_required`.
+
+**edu-05 stays 0/2 in the harness, and that number no longer tells the whole
+story.** The trace shows the model again emitted `technologies = "AI, LLM, CSV"`
+with no LinkedIn, and the claim-term guard dropped it (sim 0.0). But the golden
+harness replicates only the fact loop, so it cannot see the Phase 7 deterministic
+recovery that runs in the real stage. `test_edu05_platform_recovered_without_model_help`
+now drives `stage_classify_extract` on the actual edu-05 fixture with an extraction
+that returns zero facts, and asserts that `technologies=linkedin` still persists,
+sourced from the transcript span at t=0.0 ("...how to mine your LinkedIn
+connections in 60 seconds") with a real quote and timestamp. The platform is
+searchable end-to-end even though the model never names it; the accepted
+limitation is about model emission, and the mitigation is deterministic.
+
+## September 20, 2026 — summary grounding gate (Phase 8A.2)
+
+The Evidence Ledger covered facts and (as of Phase 7) entities. `reels.summary`
+was never checked, yet migration 2 indexes it into `reels_fts`, so an
+ungrounded model narrative was simultaneously the top UI field and a keyword
+search surface. `reels.summary_grounding` now stores the share of the
+summary's claim terms found anywhere in the source spans
+(`app/knowledge/evidence.py:grounding_ratio`), recomputed on manual edit.
+
+**Calibration, measured on the 21 real Phase-6 reels** (read-only query of
+`data/reelvault.db`, terms extracted with the same `_claim_terms` the fact
+guard uses):
+
+| Grounding ratio | 1.00 | ≥0.9 | ≥0.8 | ≥0.7 | ≥0.6 | ≥0.5 |
+|---|---|---|---|---|---|---|
+| Summaries passing | 8/21 | 11/21 | 15/21 | 15/21 | 16/21 | 18/21 |
+
+Median 0.909, mean 0.799. Requiring full support would flag 13 of 21 real
+summaries — abstractive wording legitimately puts a few terms outside the
+source vocabulary, and a marker that fires two thirds of the time teaches
+the user to ignore it. `SUMMARY_GROUNDING_MIN = 0.80` flags the loose tail:
+6 of 21, with the measured distribution
+`[0.0, 0.33, 0.43, 0.5, 0.57, 0.69 | 0.8, 0.88, 0.89, 0.89, 0.91, 0.94, 0.95, 1.0 ×8]`.
+One real summary shared **zero** terms with its source (reel 1: 15.4 s, no
+transcript segments, 4 OCR lines) — exactly the case the marker exists for.
+
+Honest limits of this gate:
+
+- It is lexical, not semantic. A high ratio does not make a summary true; it
+  only says the words came from somewhere in the source.
+- The 0.80 boundary is a knife-edge on this corpus: one real summary sits at
+  exactly 0.80 and passes. Re-tuning changes that row's verdict.
+- `key_takeaways` / `action_items` carry the same leak and are **not** gated:
+  applying the same 0.80 rule would drop 45 of 121 real items (37%), a recall
+  cost with no measured wrongness behind it. They are also absent from
+  `reels_fts`, so they cannot corrupt search the way the summary could. Left
+  as a documented open item.
+- Pre-v5 rows store NULL and are reported `summary_verified: false` — they
+  were never checked, and the UI says so rather than back-filling a verdict.
+  **This produced a real UX defect, now fixed:** immediately after the v5
+  migration all 21 live reels displayed the `not source-checked` chip, because
+  none had been re-extracted. Honest, but it reproduced the cry-wolf problem
+  the 0.80 calibration exists to prevent, arriving from the unmeasured side
+  rather than the ungrounded side.
+- **Backfill executed 2026-09-20** (`scripts/backfill_summary_grounding.py`,
+  owner-authorized). No model call is needed — transcript, OCR and caption
+  are already stored. Dry run reproduced the calibration exactly (21 rows,
+  6 below the gate: reels 1 @0.0, 4 @0.333, 15 @0.429, 21 @0.5, 8 @0.571,
+  22 @0.688), `--apply` persisted all 21 ratios, and a second run reported
+  "nothing to backfill". The API now serves 15 verified / 6 flagged with no
+  NULLs, and the UI was checked in the browser on the two extremes: reel 2
+  (grounding 1.0) renders no chip, reel 1 (0.0) renders `not source-checked`
+  in the warn colour. The script only writes NULL rows, so a re-extracted or
+  user-corrected measurement is never overwritten.
+  A pre-backfill snapshot was taken at
+  `D:/Temp/user/reelvault_pre_backfill_20260920_183021.db` (temporary).
+- No reel was re-extracted, so the stored ratios come from measuring each
+  persisted summary against the sources already in the database — they are not
+  a re-extraction result, and the summaries themselves are unchanged.
+
 ## September 17, 2026 — education field-keyed candidate (not accepted)
 
 Education-only output uses validated field arrays converted to the existing

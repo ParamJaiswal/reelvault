@@ -10,10 +10,35 @@ import logging
 from pathlib import Path
 
 from app.core.config import settings
+from app.pipeline.media import MAX_VIDEO_MB
 
 log = logging.getLogger("rv.fetch")
 
 YT_DLP_ERRORS_LOGINWALL = ("login required", "private", "rate-limit", "checkpoint")
+
+
+def verify_size(path: Path) -> Path:
+    """Reject a fetched file that breaks the storage ceiling, deleting it so
+    an oversized download can never reach the media stage or linger on disk.
+
+    Measured on the file rather than via a yt-dlp format filter
+    (max_filesize): Instagram's reported filesize is frequently absent, and a
+    filter that silently matches nothing fails as a misleading 'unavailable'
+    download error. The bytes on disk are the only trustworthy measurement.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return path          # vanished; the caller's existence check reports it
+    if size > MAX_VIDEO_MB * 1000 * 1000:
+        path.unlink(missing_ok=True)
+        log.info("rejected %s (%.0f MB over the %d MB limit)",
+                 path.name, size / 1e6, MAX_VIDEO_MB)
+        raise FetchError(
+            f"That video is bigger than the {MAX_VIDEO_MB} MB limit, so it "
+            f"wasn't imported. Trim it, or attach a smaller file instead."
+        )
+    return path
 
 
 def download_reel(url: str, shortcode: str) -> dict:
@@ -53,7 +78,7 @@ def download_reel(url: str, shortcode: str) -> dict:
             log.info("yt-dlp failed (%s); trying Playwright fallback", msg[:60])
             result = ig_browser.fetch_reel(url, outdir)
             if result:
-                return {"path": result["path"],
+                return {"path": str(verify_size(Path(result["path"]))),
                         "caption": "",
                         "author_handle": "",
                         "title": result.get("title") or ""}
@@ -74,6 +99,8 @@ def download_reel(url: str, shortcode: str) -> dict:
         if not cands:
             raise FetchError("Download reported success but no file found.")
         p = cands[-1]
+    # verify the file we actually settled on, not just yt-dlp's first guess
+    verify_size(p)
     meta = {
         "path": str(p),
         "caption": (info or {}).get("description") or "",

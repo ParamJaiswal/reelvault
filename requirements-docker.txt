@@ -6,7 +6,10 @@ httpx
 yt-dlp
 rapidocr-onnxruntime
 fastembed
-pillow
+# 12.1.0 introduced get_flattened_data(), used by media.phash(); older
+# Pillow raises AttributeError, which sample_frames swallows per-frame and
+# frame de-duplication silently stops working.
+pillow>=12.1.0
 numpy
 python-multipart
 python-dateutil

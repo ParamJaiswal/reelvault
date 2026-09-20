@@ -23,6 +23,7 @@ import json
 import logging
 import secrets
 import time
+from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
@@ -73,9 +74,6 @@ def _secret() -> bytes:
     if not secret_file.exists():
         secret_file.write_text(secrets.token_urlsafe(48), encoding="utf-8")
     return secret_file.read_text(encoding="utf-8").strip().encode()
-
-
-from pathlib import Path  # noqa: E402  (after _secret use-site for clarity)
 
 
 def make_access_jwt(user_id: int, role: str, sid: int,

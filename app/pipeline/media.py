@@ -24,6 +24,11 @@ log = logging.getLogger("rv.media")
 # reaches OCR — static overlays would otherwise be OCR'd once per sample.
 PHASH_MIN_HAMMING_DISTANCE = 5
 
+# Storage ceiling for one imported video, enforced by validate_video and by
+# the downloader. Kept in one place so a fetched file and an uploaded file
+# face the same rule.
+MAX_VIDEO_MB = 500
+
 
 class MediaError(Exception):
     pass
@@ -95,8 +100,9 @@ def validate_video(path: str) -> dict:
     if dur <= 0.2:
         raise PermanentMediaError("Video has no playable duration.")
     size_mb = Path(path).stat().st_size / 1e6
-    if size_mb > 500:
-        raise PermanentMediaError("File larger than 500MB limit.")
+    if size_mb > MAX_VIDEO_MB:
+        raise PermanentMediaError(
+            f"File larger than {MAX_VIDEO_MB}MB limit.")
     return {
         "duration_s": dur,
         "width": int(vstreams[0].get("width") or 0),
@@ -180,7 +186,7 @@ def sample_frames(video: str, reel_id: int, duration: float) -> list[dict]:
 def phash(img_path: str) -> str:
     """64-bit DCT-ish perceptual hash from 32x32 grayscale."""
     img = Image.open(img_path).convert("L").resize((32, 32))
-    px = list(img.getdata())
+    px = list(img.get_flattened_data())
     # simple 8x8 block means -> top-8x8 DCT surrogate
     blocks = []
     for by in range(8):

@@ -200,11 +200,18 @@ class TestStageFlow:
         stages.stage_classify_extract(rid, {})
         with get_db() as db:
             facts = [dict(r) for r in db.execute(
-                "SELECT * FROM facts WHERE reel_id=?", (rid,))]
-        assert len(facts) == 1
-        assert facts[0]["value"] == "LinkedIn networking"
-        assert facts[0]["evidence_quote"] == quote
-        assert facts[0]["evidence_t_s"] == 0.0
+                "SELECT * FROM facts WHERE reel_id=? ORDER BY field, value",
+                (rid,))]
+        # Phase 7 deterministic skill recovery adds one 'technologies' fact
+        # for the verbatim "linkedin" mention - that is a source-anchored
+        # regex fact, not a model claim. The fabrication guard must still
+        # hold: the company=Zylker claim never persists.
+        assert sorted((f["field"], f["value"]) for f in facts) == [
+            ("technologies", "linkedin"), ("topic", "LinkedIn networking")]
+        assert all(f["field"] != "company" for f in facts)
+        topic = next(f for f in facts if f["field"] == "topic")
+        assert topic["evidence_quote"] == quote
+        assert topic["evidence_t_s"] == 0.0
 
     def test_education_deadline_replay_uses_source_fallback(
             self, tmp_db, monkeypatch, sample_user):
@@ -249,7 +256,13 @@ class TestStageFlow:
         with get_db() as db:
             row = db.execute("SELECT deadline_iso, deadline_raw FROM reels WHERE id=?",
                              (rid,)).fetchone()
-            assert db.execute("SELECT COUNT(*) FROM facts WHERE reel_id=?", (rid,)).fetchone()[0] == 0
+            persisted_facts = [dict(r) for r in db.execute(
+                "SELECT field, value FROM facts WHERE reel_id=?", (rid,))]
+        # The zero-supported deadline entry must not persist. Only the
+        # deterministic skill regex may add facts ("sql" appears verbatim
+        # in edu-03's source) - Phase 7 platform recovery, by design.
+        assert all(f["field"] == "technologies" for f in persisted_facts)
+        assert "deadline" not in {f["value"].lower() for f in persisted_facts}
         assert row["deadline_iso"] is not None
         persisted = datetime.fromisoformat(row["deadline_iso"]).date()
         print(f"edu-03 replay: evidence_score=0; parsed_date={expected.date()}; "
@@ -293,6 +306,165 @@ class TestStageFlow:
         ] == [("linkedin", 0.0)]
         assert any(d.get("value") == "Zylker" for e in events
                    for d in e.get("dropped", []))
+
+    def test_skill_matcher_rejects_substring_false_positives(
+            self, tmp_db, monkeypatch, sample_user):
+        """Word-boundary regex: 'pythonic' must NOT yield technologies=python,
+        'digital' must NOT yield technologies=git. Only verbatim whole-word
+        mentions (e.g. 'Python' as a token) become facts."""
+        from app.pipeline import stages
+
+        reply = json.dumps({
+            "summary": "s", "categories": ["Tutorial"],
+            "primary_schema": "education", "key_takeaways": [],
+            "action_items": [], "entities": [], "facts": [],
+        })
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: FakeLLM(reply))
+        rid = mk_reel(sample_user, shortcode="SKILLsubstr01")
+        with get_db() as db:
+            # Every "skill" is a substring inside a larger token; none are
+            # whole-word matches. Verbatim: "tableau" appears as a word.
+            db.execute(
+                "INSERT INTO transcript_segments(reel_id,start_s,end_s,text)"
+                " VALUES (?,0,5,"
+                "'Learn pythonic ways; great digital art; we ship fast.')",
+                (rid,))
+            db.execute(
+                "INSERT INTO transcript_segments(reel_id,start_s,end_s,text)"
+                " VALUES (?,10,12,'She painted a tableau of dishes.')",
+                (rid,))
+        stages.stage_classify_extract(rid, {})
+        with get_db() as db:
+            values = {r["value"] for r in db.execute(
+                "SELECT value FROM facts WHERE reel_id=? AND field='technologies'",
+                (rid,))}
+        assert "python" not in values, f"pythonic matched python; got {values}"
+        assert "git" not in values, f"digital matched git; got {values}"
+        assert "tableau" in values, f"verbatim 'tableau' must survive; got {values}"
+
+    def test_skill_matcher_treats_punctuation_as_a_word_boundary(self, tmp_db,
+                                                                  monkeypatch,
+                                                                  sample_user):
+        """Documents the deliberate boundary rule: only letters and digits
+        bind a token to its neighbour. So 'python-based' and 'git-bashing'
+        ARE mentions (hyphen compounds name the tool), while 'pythonic' and
+        'digital' are not. Picking this rule keeps the matcher aligned with
+        evidence.py's token-boundary philosophy."""
+        from app.pipeline import stages
+
+        reply = json.dumps({
+            "summary": "s", "categories": ["Tutorial"],
+            "primary_schema": "education", "key_takeaways": [],
+            "action_items": [], "entities": [], "facts": [],
+        })
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: FakeLLM(reply))
+        rid = mk_reel(sample_user, shortcode="SKILLhyph01")
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO transcript_segments(reel_id,start_s,end_s,text)"
+                " VALUES (?,7,9,'A python-based stack; daily git-bashing.')"
+                , (rid,))
+        stages.stage_classify_extract(rid, {})
+        with get_db() as db:
+            rows = [dict(r) for r in db.execute(
+                "SELECT value, evidence_t_s FROM facts WHERE reel_id=?"
+                " AND field='technologies'", (rid,))]
+        assert {r["value"] for r in rows} == {"python", "git"}
+        assert all(r["evidence_t_s"] == 7.0 for r in rows)
+
+    def test_skill_matcher_attributes_source_and_timestamp(
+            self, tmp_db, monkeypatch, sample_user):
+        """Skills matched in OCR must claim evidence_source='ocr' with the
+        OCR row's t_s, not the hardcoded ('transcript', None) the old code
+        wrote. Skills from caption claim evidence_source='caption'."""
+        from app.pipeline import stages
+
+        reply = json.dumps({
+            "summary": "s", "categories": ["Tutorial"],
+            "primary_schema": "education", "key_takeaways": [],
+            "action_items": [], "entities": [], "facts": [],
+        })
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: FakeLLM(reply))
+        rid = mk_reel(sample_user, shortcode="SKILLattr01")
+        with get_db() as db:
+            db.execute("UPDATE reels SET caption=? WHERE id=?",
+                       ("Python is in the description here.", rid))
+            db.execute(
+                "INSERT INTO transcript_segments(reel_id,start_s,end_s,text)"
+                " VALUES (?,0,5,'Hello everyone.')", (rid,))
+            db.execute(
+                "INSERT INTO ocr_results(reel_id,t_s,text,conf)"
+                " VALUES (?,17.5,'Our tutorial uses AWS and docker',1.0)",
+                (rid,))
+        stages.stage_classify_extract(rid, {})
+        with get_db() as db:
+            rows = [dict(r) for r in db.execute(
+                "SELECT value, evidence_source, evidence_t_s, evidence_quote"
+                " FROM facts"
+                " WHERE reel_id=? AND field='technologies'"
+                " ORDER BY value", (rid,))]
+        by_val = {r["value"]: r for r in rows}
+        assert "python" in by_val, f"caption skill missing; got {rows}"
+        assert by_val["python"]["evidence_source"] == "caption"
+        assert by_val["python"]["evidence_t_s"] is None
+        for name in ("aws", "docker"):
+            assert name in by_val, f"OCR skill {name} missing; got {rows}"
+            assert by_val[name]["evidence_source"] == "ocr"
+            assert by_val[name]["evidence_t_s"] == 17.5
+            assert "AWS" in by_val[name]["evidence_quote"] or "docker" in (
+                by_val[name]["evidence_quote"].lower())
+
+    def test_edu05_platform_recovered_without_model_help(
+            self, tmp_db, monkeypatch, sample_user):
+        """The accepted Phase 7 limitation was that Qwen2.5-3B never emits
+        LinkedIn for edu-05, and the golden harness cannot see the fix because
+        it replicates only the fact loop. This drives the real stage on the
+        real fixture with an extraction that returns NO facts, so the only
+        thing that can persist is the deterministic matcher — proving the
+        platform is searchable end-to-end regardless of model output."""
+        from pathlib import Path
+
+        from app.pipeline import stages
+
+        case = json.loads((Path(__file__).parent / "golden" / "edu-05.json")
+                          .read_text(encoding="utf-8"))
+        reply = json.dumps({
+            "summary": "networking", "categories": ["Educational"],
+            "primary_schema": "education", "key_takeaways": [],
+            "action_items": [], "entities": [], "facts": [],
+        })
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: FakeLLM(reply))
+        rid = mk_reel(sample_user, shortcode="EDU05stage1")
+        with get_db() as db:
+            db.execute("UPDATE reels SET caption=? WHERE id=?",
+                       (case["caption"], rid))
+            for segment in case["transcript"]:
+                db.execute(
+                    "INSERT INTO transcript_segments(reel_id,start_s,end_s,text)"
+                    " VALUES (?,?,?,?)",
+                    (rid, segment["t"], segment["t"] + 1, segment["text"]))
+            for overlay in case["ocr"]:
+                db.execute("INSERT INTO ocr_results(reel_id,t_s,text,conf)"
+                           " VALUES (?,?,?,?)",
+                           (rid, overlay["t"], overlay["text"], 1.0))
+        stages.stage_classify_extract(rid, {})
+        with get_db() as db:
+            rows = [dict(r) for r in db.execute(
+                "SELECT field, value, evidence_source, evidence_quote,"
+                " evidence_t_s, confidence FROM facts WHERE reel_id=?"
+                " ORDER BY value", (rid,))]
+        linkedin = [r for r in rows if r["value"] == "linkedin"]
+        assert len(linkedin) == 1, (
+            f"expected exactly one recovered linkedin fact, got {rows}")
+        fact = linkedin[0]
+        assert fact["field"] == "technologies"
+        assert fact["evidence_source"] == "transcript"
+        # the quote must be the real span that mentions it, and timed so the
+        # UI can seek there — not the bare token with a null timestamp
+        assert "linkedin" in fact["evidence_quote"].lower()
+        assert len(fact["evidence_quote"]) > len("linkedin")
+        assert fact["evidence_t_s"] is not None
+        assert fact["confidence"] == 0.95
 
     def test_finalize_merges_duplicates_by_shortcode(self, tmp_db, sample_user):
         from app.pipeline import stages

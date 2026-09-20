@@ -883,3 +883,168 @@ Next:
 - Owner authorization to commit the working tree (stages.py entity guard,
   deadline parse tests, edu-03 replay test, EVAL/handoff docs) as the
   Phase 7 closing checkpoint.
+
+Date: 2026-09-20
+Phase: Post-Phase-7 verification + regression fix
+Done:
+- Full read-through of the codebase at HEAD 738603c (main agent, direct reads).
+- Fixed test regression introduced by 738603c (deterministic platform
+  recovery): tests/test_pipeline.py assertions in
+  test_fabricated_claim_with_real_quote_is_not_persisted and
+  test_education_deadline_replay_uses_source_fallback now accept the
+  source-anchored `technologies` regex facts ("linkedin", "sql") while
+  preserving the fabrication guards (company=Zylker never persists;
+  zero-supported deadline entry never persists). Tests were stale vs.
+  intended behavior; no production code changed.
+- Registered the jev MCP server in Qoder user scope
+  (C:\Users\dell\.qoder\settings.json), mirroring the Zed context_servers
+  entry; AI_GATEWAY_API_KEY kept as an env reference, not plaintext.
+- Fixed Pillow deprecation in app/pipeline/media.py phash():
+  img.getdata() -> img.get_flattened_data() (getdata removed in
+  Pillow 14; installed version 12.3.0 warns).
+- Verified the untracked "ReelVault Project Codebase Review.md" audit
+  claims match repo reality: commit d7c32ed (P0 audit batch) is an
+  ancestor of HEAD and tests/test_audit_p0.py +
+  tests/test_category_normalization.py exist.
+Verification:
+- pytest tests/test_pipeline.py -q: 10 passed.
+- phash hash output byte-identical between getdata and
+  get_flattened_data on a deterministic random test image.
+- Full non-AI suite: 197 passed, 2 skipped (post-Pillow-fix).
+Blockers:
+- App server (:8756) and llama-server (:8091) are down (healthz check);
+  not restarted this session.
+- jev tools become visible only after /mcp reload in a Qoder session.
+Next:
+- Owner decisions: commit the test fix + this handoff entry; disposition of
+  "ReelVault Project Codebase Review.md" (103k-line untracked transcript);
+  uncommitted AGENTS.md Jev-workflow edit.
+
+Date: 2026-09-20
+Phase: 8A complete (trust fixes) + two 8C hygiene items
+Done:
+- State assessment: full read of HEAD 738603c, verified the untracked
+  codebase-review transcript's P0 claims against git (d7c32ed is an ancestor;
+  tests/test_audit_p0.py and tests/test_category_normalization.py exist).
+- Produced the Phase 8 plan (8A correctness, 8B evaluation honesty, 8C finish
+  the promise, 8D prove v0.1 exit) with explicit non-goals honoring the
+  2026-09-18 accepted-limitation decision. Owner approved starting.
+- 8A.1 Skill matcher (defect introduced by committed 738603c): substring
+  containment replaced by whole-token regex (SKILL_RES), and each matched
+  skill now carries the SourceSpan that contained it, so evidence_source,
+  evidence_quote and evidence_t_s are real rather than a hardcoded
+  "transcript"/None. Measured before state: "pythonic"->python,
+  "digital"->git. Also fixed a latent ordering bug: build_spans ran AFTER the
+  pre-pass, so the matcher referenced spans before assignment.
+- 8A.2 Summary evidence gate: grounding_ratio() + SUMMARY_GROUNDING_MIN in
+  evidence.py (reuses _claim_terms, no second support notion), schema v5
+  adds reels.summary_grounding, extraction persists it (NULL = never
+  measured, distinct from 0.0 = measured ungrounded), reel_card derives
+  summary_verified, PATCH recomputes on manual edit scoped to owner, UI shows
+  a "not source-checked" chip. Threshold chosen from measured data, not
+  intuition: 21 real reels pass 8/11/15/15/16/18 at coverage
+  1.0/.9/.8/.7/.6/.5, median 0.909, so strict 1.0 would flag 13/21 and make
+  the marker ignorable; 0.80 flags the 6-item loose tail including one real
+  summary with zero source overlap.
+- 8A.3 Dependency floor: requirements-docker.txt pillow>=12.1.0, verified
+  against Pillow's own release notes that get_flattened_data() was introduced
+  in 12.1.0 (a pillow>=12 floor would still install a 12.0.x without it).
+- 8C.3 Download size cap: media.MAX_VIDEO_MB is now the single limit shared by
+  validate_video and the downloader; fetch.verify_size() deletes an oversized
+  file and raises a user-safe FetchError on both the yt-dlp and Playwright
+  result paths, instead of discovering the limit one stage too late.
+- 8C.4 auth.py Path import moved to the module header.
+- Pillow phash deprecation fixed earlier this session (getdata ->
+  get_flattened_data, byte-identical hashes verified).
+- jev MCP registered in Qoder user scope; tools now load (see blocker).
+Verification:
+- pytest tests -q --ignore=tests/test_ai_eval.py: 226 passed, 2 skipped,
+  8 warnings in 10.06s. Tree baseline at session start was 197 passed,
+  2 skipped; +29 net new tests (tests/test_summary_grounding.py 19,
+  tests/test_fetch_size_cap.py 7, 3 skill-matcher cases in test_pipeline.py).
+- v5 migration rehearsed on a COPY of the owner's real DB taken via sqlite3
+  backup API (includes WAL): all ten table counts identical before/after
+  (21 reels, 88 facts, 320 segments, 131 OCR, 87 entities, 59 reel_entities,
+  560 embeddings, 294 events, 29 sessions, 147 jobs); PRAGMA integrity_check
+  ok; reels_fts still returns 3 hits for 'hiring' after the ALTER TABLE;
+  schema_migrations 1-4 -> 1-5; original file confirmed untouched at v4.
+- One cap-test failure was root-caused as a test defect (glob 'CAP01.*' does
+  not match 'cap01_actual.mp4' on Windows, so it hit the wrong branch) and
+  the fixture was corrected; production code was not altered to satisfy it.
+- Calibration and gate limits recorded in docs/EVAL.md (Sept 20 section).
+Blockers:
+- Jev review gate did NOT run: the jev MCP server loads but every call fails
+  with "AI Gateway authentication failed". AI_GATEWAY_API_KEY is not reaching
+  the spawned process. Owner must export it in the environment that launches
+  Qoder (Zed's copy is a shell expansion, not a literal). Per AGENTS.md the
+  gate is required before any completion claim, so the items above are
+  implemented and locally verified but UNREVIEWED.
+- llama-server (:8091) and the app server (:8756) are both down, so
+  tests/test_ai_eval.py was never run: no live extraction, no end-to-end UI
+  verification, and no reel was reprocessed. Real DB summaries are still
+  NULL for grounding; the published distribution measured stored summaries
+  against stored sources, it is not a re-extraction result.
+- Nothing committed. Working tree holds all Phase 8A/8C changes plus the
+  owner's uncommitted AGENTS.md section and the untracked 103k-line
+  "ReelVault Project Codebase Review.md".
+Next:
+- Owner: fix the jev key and run the review gate over this diff, then
+  authorize the commit. After that, 8C.2 (FTS over facts/transcript/OCR)
+  deliberately deferred: it changes search ranking, which currently measures
+  10/10, and cannot be re-verified while both services are down.
+
+Live verification follow-up (same day, 2026-09-20, owner authorized restart):
+Done:
+- llama-server restarted on :8091 with the Qwen2.5-3B checkpoint and the app
+  server restarted on 127.0.0.1:8756 (localhost only, not 0.0.0.0). Startup
+  applied the v5 migration to the real database.
+- Ran the live golden benchmark, which had never been executed this session.
+- Added test_edu05_platform_recovered_without_model_help: drives the real
+  stage on the real edu-05 fixture with an extraction returning zero facts,
+  proving technologies=linkedin persists from the t=0.0 transcript span.
+  This is the end-to-end proof the golden harness structurally cannot give.
+Verification:
+- /healthz {"ok":true,"version":"1.1.0"}; /readyz all_ready=true with
+  db/llm/embedder all true.
+- RV_EVAL_TRACE=1 pytest tests/test_ai_eval.py -q -s: 1 passed in 118.03s,
+  16 cases, all served_by=qwen. field recall 0.810 (17/21), deadline parse
+  recall 1.000 (4/4), unsupported-kept 0.036 (2/55), min-kept 0.875,
+  multilabel 0.750, macro-F1 0.509, schema agreement 0.688, malformed 0.0,
+  mean 7.32s/reel. All gates pass; both varying metrics sit at the TOP of the
+  previously recorded spread, so this is no-regression evidence, not an
+  improvement claim. Recorded in docs/EVAL.md.
+- Real DB after startup: schema versions [1,2,3,4,5], summary_grounding
+  present, 21 reels and 88 facts intact.
+- Browser check of the shipped UI (read-only, nothing edited): detail dialog
+  renders the "not source-checked" chip with correct amber styling.
+- pytest tests -q --ignore=tests/test_ai_eval.py: 227 passed, 2 skipped.
+New finding and its resolution (owner authorized the backfill same day):
+- All 21 live reels displayed the not-source-checked chip right after startup
+  migrated to v5, because every pre-v5 row had NULL grounding. Honest but
+  useless: it recreated the cry-wolf problem the 0.80 threshold was calibrated
+  to avoid, from the unmeasured side instead of the ungrounded side.
+- Resolved with scripts/backfill_summary_grounding.py (no model call needed;
+  transcript/OCR/caption are already stored). Dry run reproduced the
+  calibration exactly (21 rows, 6 below the gate: reels 1 @0.0, 4 @0.333,
+  15 @0.429, 21 @0.5, 8 @0.571, 22 @0.688); --apply persisted all 21; a second
+  run reported "nothing to backfill". The script writes only NULL rows, so a
+  re-extracted or user-corrected measurement can never be clobbered.
+  Pre-backfill snapshot: D:/Temp/user/reelvault_pre_backfill_20260920_183021.db
+  (temporary directory, not a validated restore).
+- Post-backfill verification: API serves 15 verified / 6 flagged, no NULLs
+  remaining. Browser check on the two extremes — reel 2 (grounding 1.0) renders
+  no chip; reel 1 (0.0) renders "not source-checked" in rgb(255,180,84). The
+  marker discriminates on live data.
+- 5 tests added for the backfill (dry-run does not persist, apply persists,
+  existing measurement never overwritten, second run is a no-op, blank summary
+  stays NULL). One initial failure was a wrong test fixture, not a code bug:
+  GROUNDED needs the OCR span for "before September 15", so a transcript-only
+  source correctly scores 0.7; the helper was fixed, the code was not.
+Blockers:
+- Jev review gate still NOT run: jev MCP calls fail with "AI Gateway
+  authentication failed" even with the server loaded. Owner must export
+  AI_GATEWAY_API_KEY in the environment that launches Qoder.
+Next:
+- Owner: fix the jev key so the gate can clear this diff, then authorize the
+  commit. Then Phase 8B.1 (predicted-schema end-to-end metric), justified by
+  the 5/16 live schema mismatches now recorded in docs/EVAL.md.
