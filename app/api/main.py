@@ -156,11 +156,12 @@ def create_reel_from_request(uid: int, req: IngestRequest) -> dict:
                 " VALUES(?,?,?,'text/html')",
                 (reel_id, doc_body, resolved.get("source_url")))
         ev_row = None
-    # URL reels have no media yet: the ingest stage runs download_reel.
-    # Use kind-aware stage plans so text sources skip media/transcribe.
+    # Only video reels run the ingest download stage: a failed download there
+    # triggers the metadata-only terminal path, which would clobber the stored
+    # document body of text sources. Text media URLs stay in meta for later.
     from app.db.queue import stages_for_kind
     plan = stages_for_kind(content_kind)
-    if resolved.get("needs_download"):
+    if resolved.get("needs_download") and content_kind == "video":
         queue.enqueue(reel_id, ["ingest"] + plan)
     else:
         queue.enqueue(reel_id, plan)
@@ -362,6 +363,19 @@ def delete_reel(reel_id: int, purge_media: bool = True,
         frames_dir = settings.media_dir / "frames" / str(reel_id)
         thumb = resolve_media_path(r["thumb_path"], "frames")
         db.execute("DELETE FROM embeddings WHERE reel_id=?", (reel_id,))
+        # Contentless FTS has no delete trigger on reels: remove the row via
+        # the shadow values, then drop the shadow row itself.
+        sh = db.execute("SELECT title, summary, caption, author_handle,"
+                        " facts_text, transcript_text, ocr_text"
+                        " FROM reels_fts_shadow WHERE reel_id=?",
+                        (reel_id,)).fetchone()
+        if sh:
+            db.execute(
+                "INSERT INTO reels_fts(reels_fts, rowid, title, summary, caption,"
+                " author_handle, facts_text, transcript_text, ocr_text)"
+                " VALUES('delete',?,?,?,?,?,?,?,?)",
+                (reel_id, sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], sh[6]))
+            db.execute("DELETE FROM reels_fts_shadow WHERE reel_id=?", (reel_id,))
         db.execute("DELETE FROM reels WHERE id=?", (reel_id,))
     if purge_media:
         if media:
@@ -439,15 +453,30 @@ def patch_reel(reel_id: int, body: ReelPatch,
             ocrs = [dict(x) for x in db.execute(
                 "SELECT t_s, text FROM ocr_results WHERE reel_id=?"
                 " ORDER BY t_s", (reel_id,))]
+            doc = db.execute("SELECT body_text FROM documents WHERE reel_id=? LIMIT 1",
+                             (reel_id,)).fetchone()
         fields["summary_grounding"] = grounding_ratio(
-            txt, stg.build_spans(segs, ocrs, own["caption"] or "")) if txt else None
+            txt, stg.build_spans(segs, ocrs, own["caption"] or "",
+                                 doc["body_text"] if doc else "")) if txt else None
     if not fields:
         raise HTTPException(422, "nothing to update")
     sets = ", ".join(f"{k}=?" for k in fields)
     with get_db() as db:
         db.execute(f"UPDATE reels SET {sets} WHERE id=? AND user_id=?",
                    (*fields.values(), reel_id, uid))
+    _fts_refresh(reel_id)
     return {"updated": reel_id}
+
+
+def _fts_refresh(reel_id: int) -> None:
+    """Keep search in step with user corrections. Contentless FTS lost the
+    reels_au trigger in migration 6, so PATCH-time reindex is explicit."""
+    from app.db.schema import refresh_fts
+
+    try:
+        refresh_fts(reel_id)
+    except Exception:  # noqa: BLE001 — never fail a correction on indexing
+        log.exception("FTS refresh failed for reel %s", reel_id)
 
 
 class FactAdd(BaseModel):
@@ -476,6 +505,7 @@ def add_fact(reel_id: int, body: FactAdd,
             " user_corrected) VALUES (?,?,?,?,?,?,?,?,1)",
             (reel_id, "note", field, value, "metadata",
              body.quote.strip() or None, body.t_s, 1.0))
+    _fts_refresh(reel_id)
     return {"added": cur.lastrowid}
 
 
@@ -483,11 +513,12 @@ def add_fact(reel_id: int, body: FactAdd,
 def delete_fact(fact_id: int, uid: int = Depends(require_auth)):
     with get_db() as db:
         f = db.execute(
-            "SELECT f.id FROM facts f JOIN reels r ON r.id=f.reel_id"
+            "SELECT f.id, f.reel_id FROM facts f JOIN reels r ON r.id=f.reel_id"
             " WHERE f.id=? AND r.user_id=?", (fact_id, uid)).fetchone()
         if not f:
             raise HTTPException(404, "Fact not found")
         db.execute("DELETE FROM facts WHERE id=?", (fact_id,))
+    _fts_refresh(f["reel_id"])
     return {"deleted": fact_id}
 
 
@@ -511,6 +542,7 @@ def correct_fact(fact_id: int, body: FactPatch,
                 "UPDATE facts SET ai_value=CASE WHEN ai_value IS NULL THEN value"
                 " ELSE ai_value END, value=?, user_corrected=1,"
                 " updated_at=datetime('now') WHERE id=?", (body.value, fact_id))
+    _fts_refresh(f["reel_id"])
     return {"corrected": fact_id}
 
 

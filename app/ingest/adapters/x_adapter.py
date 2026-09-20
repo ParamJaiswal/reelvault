@@ -72,7 +72,9 @@ class XPostAdapter(IngestionAdapter):
             "source_url": f"https://x.com/i/status/{tweet_id}",
             "caption": text,
             "author_handle": author or name,
-            "needs_download": bool(media_urls),
+            # Text-kind pipeline never downloads; media URLs kept in meta for
+            # a future image-OCR pass.
+            "needs_download": False,
             "content_kind": "x_post",
             "meta": {
                 "tweet_text": text,

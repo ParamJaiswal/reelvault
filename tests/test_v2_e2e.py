@@ -101,6 +101,36 @@ def test_instagr_am_short_link_routes_to_ig(client, tmp_db):
     assert adapter.name != "article"
 
 
+def test_x_video_tweet_still_skips_ingest(client, tmp_db):
+    """Regression: media-bearing tweets must not gain an ingest download job —
+    a failed x.com download triggers the metadata-only terminal path and would
+    clobber the stored document body."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "__typename": "Tweet",
+        "text": "watch this demo",
+        "user": {"screen_name": "dev", "name": "Dev"},
+        "mediaDetails": [{"type": "video", "video_info": {"variants": [
+            {"content_type": "video/mp4", "bitrate": 1000,
+             "url": "https://video.x/demo.mp4"}]}}],
+    }
+    resp.raise_for_status = MagicMock()
+    with patch("app.ingest.adapters.x_adapter.httpx.get", return_value=resp):
+        res = client.post("/api/reels", json={
+            "url": "https://x.com/dev/status/1234567890124"})
+    assert res.status_code == 200
+    rid = res.json()["reel_id"]
+    db = sqlite3.connect(str(tmp_db))
+    stages = {r[0] for r in
+              db.execute("SELECT stage FROM jobs WHERE reel_id=?", (rid,))}
+    doc = db.execute("SELECT body_text FROM documents WHERE reel_id=?",
+                     (rid,)).fetchone()
+    db.close()
+    assert "ingest" not in stages and "media" not in stages
+    assert doc is not None and "demo" in doc[0]
+
+
 def test_stage_media_and_transcribe_skip_for_text(tmp_db, sample_user):
     """Worker stages must no-op (not fail) when run for a text reel."""
     from app.db.schema import get_db

@@ -29,7 +29,9 @@ log = logging.getLogger("rv.ai")
 import re as _re
 
 _BEARER_RE = _re.compile(r"Bearer\s+[A-Za-z0-9._\-]+", _re.I)
-_API_KEY_RE = _re.compile(r"(?:api[_-]?key|token|secret)[=:]\s*\S+", _re.I)
+# Matches api_key/token/secret in both `key=value` and JSON `"key": "value"` form
+_API_KEY_RE = _re.compile(
+    r"(?:api[_-]?key|token|secret)[\"']?\s*[=:]\s*\"?[^\s,}\"]+", _re.I)
 
 
 def _sanitize_error(msg: str) -> str:

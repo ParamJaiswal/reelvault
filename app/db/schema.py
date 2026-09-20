@@ -339,6 +339,11 @@ MIGRATIONS: dict[int, str] = {
     9: """
     -- facts must accept evidence from document bodies (v2 text sources) and
     -- carry a page locator for PDFs. SQLite can't ALTER a CHECK — rebuild.
+    -- executescript runs statement-by-statement: wrap in one transaction so
+    -- a mid-script failure can never drop facts without renaming them back,
+    -- and DROP IF EXISTS makes a bricked partial run rerunnable.
+    BEGIN IMMEDIATE;
+    DROP TABLE IF EXISTS facts_new;
     CREATE TABLE facts_new (
         id INTEGER PRIMARY KEY,
         reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
@@ -365,6 +370,7 @@ MIGRATIONS: dict[int, str] = {
     ALTER TABLE facts_new RENAME TO facts;
     CREATE INDEX idx_facts_reel ON facts(reel_id);
     CREATE INDEX idx_facts_field ON facts(schema_type, field);
+    COMMIT;
     """,
 }
 

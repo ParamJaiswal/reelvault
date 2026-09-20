@@ -35,12 +35,17 @@ def _is_safe_url(url: str) -> bool:
 
 # Domains we don't try to ingest (social platforms have their own adapters)
 SKIP_DOMAINS = {
-    "instagram.com", "www.instagram.com", "instagr.am",
+    "instagram.com", "instagr.am",
     "twitter.com", "x.com",
-    "linkedin.com", "www.linkedin.com",
-    "youtube.com", "www.youtube.com",
-    "tiktok.com", "www.tiktok.com",
+    "linkedin.com",
+    "youtube.com", "youtu.be",
+    "tiktok.com",
 }
+
+
+def _is_blocked_host(host: str) -> bool:
+    host = host.lower()
+    return any(host == d or host.endswith("." + d) for d in SKIP_DOMAINS)
 
 
 def _extract_text_basic(html: str) -> str:
@@ -64,20 +69,35 @@ class ArticleAdapter(IngestionAdapter):
             host = urlparse(req.url).hostname or ""
         except Exception:
             return False
-        if host.lower() in SKIP_DOMAINS:
+        if _is_blocked_host(host):
             return False
         return req.url.startswith(("http://", "https://"))
 
     def resolve(self, req: IngestRequest) -> dict[str, Any]:
         url = req.url or ""
-        if not _is_safe_url(url):
-            raise ValueError("URL resolves to a private or reserved address.")
+        # follow_redirects=False + re-checking every hop: a public host that
+        # 302s to 127.0.0.1/169.254.169.254 would otherwise bypass the guard.
+        html = ""
         try:
-            r = httpx.get(
-                url, timeout=30, follow_redirects=True,
-                headers={"User-Agent": "ReelVault/2.0 (+reelvault.local)"})
-            r.raise_for_status()
-            html = r.text
+            for _ in range(5):
+                if not _is_safe_url(url):
+                    raise ValueError("URL resolves to a private or reserved address.")
+                r = httpx.get(
+                    url, timeout=30, follow_redirects=False,
+                    headers={"User-Agent": "ReelVault/2.0 (+reelvault.local)"})
+                if r.status_code in (301, 302, 303, 307, 308):
+                    loc = r.headers.get("location")
+                    if not loc:
+                        break
+                    url = str(httpx.URL(url).join(loc))
+                    continue
+                r.raise_for_status()
+                html = r.text
+                break
+            else:
+                raise ValueError("Too many redirects.")
+        except ValueError:
+            raise
         except Exception as e:
             raise ValueError(f"Could not fetch article: {e}") from e
 

@@ -317,6 +317,33 @@ def test_error_sanitization_strips_api_key():
     assert "sk-secret123" not in _sanitize_error(err)
 
 
+def test_error_sanitization_strips_json_keys():
+    """Provider errors often embed JSON: {\\"api_key\\": \\"sk-...\\"}."""
+    from app.ai.providers import _sanitize_error
+    err = '{"error": "bad", "api_key": "sk-abc123", "token": "tok-xyz"}'
+    out = _sanitize_error(err)
+    assert "sk-abc123" not in out
+    assert "tok-xyz" not in out
+
+
+def test_article_adapter_blocks_twitter_subdomain():
+    """mobile.twitter.com must not be swallowed as an article."""
+    from app.ingest.adapters.article_adapter import ArticleAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = ArticleAdapter()
+    req = IngestRequest(user_id=1, kind="url",
+                        url="https://mobile.twitter.com/u/status/123456789")
+    assert a.matches(req) is False
+
+
+def test_article_adapter_blocks_youtu_be():
+    from app.ingest.adapters.article_adapter import ArticleAdapter
+    from app.ingest.adapters.base import IngestRequest
+    a = ArticleAdapter()
+    req = IngestRequest(user_id=1, kind="url", url="https://youtu.be/abc123")
+    assert a.matches(req) is False
+
+
 def test_fts_shadow_table_exists(tmp_db):
     """Migration 8 creates reels_fts_shadow table."""
     import sqlite3
