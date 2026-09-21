@@ -1146,3 +1146,25 @@ Blockers:
 - Scanned (image-only) PDFs get no text (no OCR on PDF pages yet).
 Next:
 - Owner installs APK on phone; shares one PDF + one image; check notes appear.
+
+---
+
+Date: 2026-09-21 (cloud seam)
+Phase: v2 Groq A/B preparation
+Done:
+- settings.llm_api_key (RV_LLM_API_KEY via .env; secret never logged; raw
+  key write via shell blocked by sandbox policy — correct).
+- OpenAICompatProvider: 429 Retry-After backoff (4 attempts) for free-tier
+  TPM ceiling; key sourced from settings first.
+- GOLDEN_FILTER env for subset eval runs (quota-bounded A/B).
+- .env.example documents the Groq trio.
+Verification:
+- 306 tests pass (9 backend incl. new backoff/key tests).
+Blockers:
+- OWNER STEP: paste the 4 .env lines (key + backend + url + model) manually
+  into D:\reelvault\.env, then restart server, then I run the A/B:
+  GOLDEN_FILTER=paper,xpost,article pytest tests/test_ai_eval.py
+Note: key was pasted into chat — recommend rotating it in the Groq console
+after testing.
+Next:
+- Run text-golden A/B vs the local 3B baseline; record in docs/EVAL.md.

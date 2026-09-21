@@ -55,6 +55,59 @@ def test_openai_compat_available_without_key():
     assert p.available() is False
 
 
+def test_openai_compat_reads_settings_key(tmp_db):
+    """Key flows from settings.llm_api_key (.env), not only os.environ."""
+    from app.ai.providers import OpenAICompatProvider
+    import app.ai.providers as mod
+    orig = mod.settings.llm_api_key
+    mod.settings.llm_api_key = "gsk_from_env_file"
+    try:
+        p = OpenAICompatProvider()
+        assert p.api_key == "gsk_from_env_file"
+    finally:
+        mod.settings.llm_api_key = orig
+
+
+def test_openai_compat_429_backoff_retry(tmp_db):
+    """429 with Retry-After is retried; success on next attempt."""
+    from app.ai.providers import OpenAICompatProvider
+    ok = MagicMock()
+    ok.status_code = 200
+    ok.json.return_value = {"choices": [{"message": {"content": "fine"}}],
+                            "usage": {}}
+    ok.raise_for_status = MagicMock()
+    limited = MagicMock()
+    limited.status_code = 429
+    limited.headers = {"retry-after": "0"}
+    p = OpenAICompatProvider(base_url="http://fake:9/v1",
+                             model="m", api_key="k")
+    with patch("app.ai.providers.httpx.post", side_effect=[limited, ok]), \
+         patch("app.ai.providers.time.sleep") as sl:
+        assert p.chat([{"role": "user", "content": "x"}]) == "fine"
+    assert sl.called
+
+
+def test_openai_compat_429_exhausts_then_raises(tmp_db):
+    from app.ai.providers import OpenAICompatProvider
+    import httpx as _hx
+    req = _hx.Request("POST", "http://fake:9/v1/chat/completions")
+    resp429 = _hx.Response(429, request=req)
+    limited = MagicMock()
+    limited.status_code = 429
+    limited.headers = {}
+    limited.raise_for_status.side_effect = _hx.HTTPStatusError(
+        "429", request=req, response=resp429)
+    p = OpenAICompatProvider(base_url="http://fake:9/v1",
+                             model="m", api_key="k")
+    with patch("app.ai.providers.httpx.post", return_value=limited), \
+         patch("app.ai.providers.time.sleep"):
+        try:
+            p.chat([{"role": "user", "content": "x"}])
+            assert False, "must raise"
+        except _hx.HTTPStatusError:
+            pass  # 4th attempt surfaces the provider's own error
+
+
 def test_openai_compat_chat_records_telemetry(tmp_db):
     """Successful chat call records to ai_runs."""
     from app.ai.providers import OpenAICompatProvider

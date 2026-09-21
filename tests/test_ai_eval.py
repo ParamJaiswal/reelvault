@@ -35,6 +35,13 @@ GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 def load_golden() -> list[dict]:
     items = [json.loads(p.read_text(encoding="utf-8"))
              for p in sorted(GOLDEN_DIR.glob("*.json"))]
+    # A/B runs on a quota-limited cloud tier: GOLDEN_FILTER="paper,xpost"
+    # restricts to matching ids without touching the default full run.
+    import os
+    flt = [s for s in (os.environ.get("GOLDEN_FILTER") or "").split(",") if s]
+    if flt:
+        items = [i for i in items
+                 if any(i["id"].startswith(f) for f in flt)]
     assert items, f"no golden items found in {GOLDEN_DIR}"
     return items
 

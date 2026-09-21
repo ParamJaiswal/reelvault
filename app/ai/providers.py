@@ -117,7 +117,8 @@ class OpenAICompatProvider:
         self.base_url = (base_url or settings.llm_server_url).rstrip("/")
         self.model = model or settings.llm_model_name
         import os
-        self.api_key = api_key or os.environ.get("RV_LLM_API_KEY", "")
+        self.api_key = (api_key or settings.llm_api_key
+                        or os.environ.get("RV_LLM_API_KEY", ""))
 
     def available(self) -> bool:
         if not self.api_key:
@@ -145,16 +146,25 @@ class OpenAICompatProvider:
             body["response_format"] = {"type": "json_object"}
         t0 = time.time()
         try:
-            r = httpx.post(
-                f"{self.base_url}/chat/completions", json=body, timeout=120,
-                headers={"Authorization": f"Bearer {self.api_key}"})
-            r.raise_for_status()
-            text = r.json()["choices"][0]["message"]["content"]
-            usage = r.json().get("usage", {})
-            _record_run("llm.chat", self.name, self.model, t0, True,
-                        reel_id=reel_id, tokens_in=usage.get("prompt_tokens"),
-                        tokens_out=usage.get("completion_tokens"))
-            return text
+            for attempt in range(4):
+                r = httpx.post(
+                    f"{self.base_url}/chat/completions", json=body, timeout=120,
+                    headers={"Authorization": f"Bearer {self.api_key}"})
+                if r.status_code == 429 and attempt < 3:
+                    # Free-tier TPM ceiling: honor Retry-After, then try again.
+                    # The durable queue's own backoff is the outer safety net.
+                    wait = min(90, int(r.headers.get("retry-after") or 20) * (attempt + 1))
+                    log.info("groq 429 — backing off %ds", wait)
+                    time.sleep(wait)
+                    continue
+                r.raise_for_status()
+                text = r.json()["choices"][0]["message"]["content"]
+                usage = r.json().get("usage", {})
+                _record_run("llm.chat", self.name, self.model, t0, True,
+                            reel_id=reel_id, tokens_in=usage.get("prompt_tokens"),
+                            tokens_out=usage.get("completion_tokens"))
+                return text
+            raise RuntimeError("LLM API kept rate-limiting (429 x4)")
         except Exception as e:  # noqa: BLE001
             _record_run("llm.chat", self.name, self.model, t0, False,
                         reel_id=reel_id, error=str(e))

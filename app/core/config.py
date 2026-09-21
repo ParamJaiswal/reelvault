@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     llm_backend: str = "llamacpp"  # llamacpp | openai_compat | none
     llm_server_url: str = "http://127.0.0.1:8091/v1"
     llm_model_name: str = "qwen2.5-3b-instruct"
+    llm_api_key: str = ""           # RV_LLM_API_KEY — openai_compat only; never log
     llm_ctx_tokens: int = 8192
     llm_max_tokens: int = 1400
     whisper_model_size: str = "small"  # tiny/base/small on 4GB VRAM
