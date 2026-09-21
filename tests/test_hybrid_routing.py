@@ -231,14 +231,32 @@ def test_fallback_warning_never_carries_the_key(caplog):
 
 def test_text_backend_without_key_fails_loudly(monkeypatch):
     """Hybrid configured but no credentials = a config error, not a silent
-    per-call downgrade to the local model."""
+    per-call downgrade to the local model — and not a retryable one either,
+    so it must dead-letter instead of burning the retry ladder."""
+    from app.db.queue import PermanentJobError
     import app.ai.providers as mod
     monkeypatch.setattr(mod.settings, "llm_api_key", "")
     monkeypatch.delenv("RV_LLM_API_KEY", raising=False)
     with patch.object(mod.settings, "llm_text_backend", "openai_compat"), \
             patch.object(mod.settings, "llm_backend", "llamacpp"):
-        with pytest.raises(RuntimeError, match="needs RV_LLM_API_KEY"):
+        with pytest.raises(PermanentJobError, match="needs RV_LLM_API_KEY"):
             mod.get_llm_for_kind("paper")
+
+
+def test_shared_endpoint_warns_that_hybrid_is_a_no_op(caplog):
+    """Forgetting RV_LLM_CLOUD_SERVER_URL leaves the 'cloud' tier pointed at
+    llama-server, so every text reel silently gets the local model."""
+    import logging
+    import app.ai.providers as mod
+    with patch.object(mod.settings, "llm_text_backend", "openai_compat"), \
+            patch.object(mod.settings, "llm_backend", "llamacpp"), \
+            patch.object(mod.settings, "llm_api_key", "k"), \
+            patch.object(mod.settings, "llm_cloud_server_url", ""), \
+            patch.object(mod.settings, "llm_server_url",
+                         "http://127.0.0.1:8091/v1"), \
+            caplog.at_level(logging.WARNING, logger="rv.ai"):
+        mod.get_llm_for_kind("paper")
+    assert "no-op" in caplog.text
 
 
 def test_changing_text_backend_rebuilds_the_wrapper():

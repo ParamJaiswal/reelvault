@@ -28,7 +28,7 @@ log = logging.getLogger("rv.ai")
 # ----------------------------------------------------------------- helpers
 import re as _re
 
-_BEARER_RE = _re.compile(r"Bearer\s+[A-Za-z0-9._\-]+", _re.I)
+_BEARER_RE = _re.compile(r"Bearer\s+[A-Za-z0-9._\-+/=]+", _re.I)
 # Matches api_key/token/secret in both `key=value` and JSON `"key": "value"` form
 _API_KEY_RE = _re.compile(
     r"(?:api[_-]?key|token|secret)[\"']?\s*[=:]\s*\"?[^\s,}\"]+", _re.I)
@@ -482,13 +482,18 @@ def _get_text_backend() -> LLMProvider:
     if _llm_text is None or _llm_text[0] != name:
         primary = _build_backend(name)
         if isinstance(primary, OpenAICompatProvider) and not primary.api_key:
-            raise RuntimeError("RV_LLM_TEXT_BACKEND=openai_compat needs "
-                               "RV_LLM_API_KEY — hybrid mode is not configured")
-        if getattr(primary, "base_url", None) == getattr(default, "base_url", None):
+            # Deterministic config fault: dead-letter the job instead of
+            # burning the retry ladder three times on every text reel.
+            from app.db.queue import PermanentJobError
+            raise PermanentJobError(
+                "RV_LLM_TEXT_BACKEND=openai_compat needs RV_LLM_API_KEY — "
+                "hybrid mode is not configured")
+        shared = getattr(primary, "base_url", None)
+        if shared is not None and shared == getattr(default, "base_url", None):
             # Both tiers address one endpoint: routing changes nothing, which
             # usually means RV_LLM_CLOUD_SERVER_URL was left unset.
             log.warning("hybrid routing is a no-op: text and default backend "
-                        "share endpoint %s", primary.base_url)
+                        "share endpoint %s", shared)
         _llm_text = (name, TextFallbackProvider(primary, default))
     return _llm_text[1]
 

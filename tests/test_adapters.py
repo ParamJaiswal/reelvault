@@ -311,6 +311,16 @@ def test_error_sanitization_strips_bearer():
     assert "[REDACTED]" in _sanitize_error(err)
 
 
+def test_error_sanitization_strips_base64_bearer():
+    """Base64 tokens carry +/= past the alphanumeric run; a partial match
+    would leave the tail of the secret in the log."""
+    from app.ai.providers import _sanitize_error
+    err = "Illegal header value b'Bearer YWJj_Zm=gh+i/j+k='"
+    out = _sanitize_error(err)
+    assert "YWJj_Zm" not in out
+    assert "i/j+k" not in out
+
+
 def test_error_sanitization_strips_api_key():
     from app.ai.providers import _sanitize_error
     err = "api_key=sk-secret123 failed"
