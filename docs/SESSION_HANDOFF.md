@@ -1238,3 +1238,51 @@ Next:
 - Restart with the hybrid `.env`, ingest one paper and one video, confirm
   `processing_events.data_json` shows `hybrid(...)` for the paper and
   `llamacpp` for the video.
+
+---
+
+Date: 2026-09-21 (evidence containment audit)
+Phase: Evidence Ledger hardening on `v2-hybrid-routing`
+Done:
+- Audited the A/B follow-up ("short-value rescue on document spans") against the
+  live library and found three doors, not one: `_short_value_match`, the
+  `value in span -> 0.75` boost in `find_evidence`, and `_sim`'s unbounded
+  `probe in span -> 1.0` shortcut. The last one is why
+  difficulty='Research' and topic='Transformer model' looked like strong
+  evidence rather than weak.
+- Documents are now chunked (`stages._split_document`, <=600-char sentence
+  chunks, PDF page locator preserved), which is what makes the locality test
+  meaningful: an article body used to arrive as one flat 66,000-char block
+  because trafilatura 2.2.0 `extract()` returns no newlines.
+- Containment inside a document chunk is capped by
+  `evidence._containment_is_local` (`20 * len(value) + 120` normalized chars);
+  beyond that doors A and B contribute nothing and door C returns 0.75 instead
+  of 1.0. Transcript/OCR/caption behavior is deliberately untouched — the same
+  budget applied there would have removed 11 of 17 real caption hits.
+- `_sim`'s verbatim shortcut now requires `MIN_QUOTE_CHARS`, so a short value
+  cannot manufacture a perfect match anywhere.
+- Two instruments kept: `scripts/audit_rescue.py` (foreign-value containment
+  false-accept rates on the live library) and
+  `scripts/replay_matcher_rules.py` (score one extraction set under HEAD's
+  matcher and the shipped one; imports HEAD rather than retyping it).
+Verification:
+- 338 tests pass, 2 skipped (14 new in `tests/test_evidence_document_locality.py`).
+- `scripts/audit_rescue.py`: foreign document hits 11 -> 4 admitted (7 removed);
+  own document hits 4 -> 1 admitted, and the 3 removed are exactly the three
+  facts listed above. ocr/caption/transcript rows unchanged.
+- `scripts/replay_matcher_rules.py` on all 19 golden rows: 66 facts kept under
+  the pre-change matcher, 66 under the shipped one, 0 flips.
+- Two full `tests/test_ai_eval.py` runs (65 -> 72 kept) were compared first and
+  rejected as evidence: raw per-item fact counts differed at temperature 0, so
+  llama-server is not run-to-run reproducible. That is why the replay harness
+  exists. Recorded in docs/EVAL.md.
+Blockers:
+- The live library still holds the three weakly-supported facts: this change
+  affects extraction, not stored rows. Re-running `classify_extract` on reels
+  26/27/28 would rewrite the owner's facts, so it was left for the owner.
+- The golden set cannot exercise the rule: its longest document row is a
+  1,200-char abstract. A multi-page-PDF golden row is the missing coverage.
+Next:
+- Add a long-document golden row (from the 15-page PDF already in the library),
+  then re-extract the three document reels and confirm the boilerplate facts
+  are gone.
