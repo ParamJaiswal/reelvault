@@ -1089,3 +1089,27 @@ Blockers:
 Next:
 - Install llama-server, run one real X post + one real paper URL through the
   full pipeline on live data; then golden-set entries per new kind.
+
+---
+
+Date: 2026-09-21 (later same session)
+Phase: v2 remaining-work pass
+Done:
+- Owner approved deps (via "continue remaining"): trafilatura 2.2.0 +
+  pypdf 6.19.0 installed & pinned. PyMuPDF still excluded (AGPL).
+- Paper adapter now streams OA PDFs (25MB cap, 40 pages) into page-marked
+  body; build_spans -> SourceSpan.page; facts carry evidence_page.
+- Article adapter: browser UA + precise DNS-failure message.
+- Detail API + UI show source text; document evidence icon.
+- Text-source golden set + N=3 protocol + eval baseline recorded.
+Verification:
+- Live arXiv 1706.03762: 15 PDF pages extracted, facts with evidence_page=1.
+- Live paulgraham.com essay: 66,635-char clean body, title persisted,
+  searchable via POST /api/search.
+- 297 tests pass (non-LLM suite), golden eval 19 items green.
+Blockers:
+- Cloud LLM backend: needs RV_LLM_API_KEY + service choice from owner.
+- Android: still frozen by policy.
+Next:
+- Use it: 20-item personal validation incl. text sources (v0 retrospective
+  criteria), then decide cloud A/B from observed pain.

@@ -58,7 +58,8 @@ complete, gated on real-LLM run + owner approval for new deps.
   `evidence_page` plumbing ready. Page locators stay NULL until then.
 - X video/photo downloads: media URLs stored in meta but not fetched;
   X tweets ingest text only. Tweet video = future work.
-- trafilatura pending approval → basic HTML extraction until installed.
+- DONE 2026-09-21: trafilatura installed+live — 66K-char clean article body
+  verified on real essay via full API pipeline.
 - Jev gate waived this session (key never reaches process); caveman reviewer
   substituted, two passes.
 - Dead-reel FTS hygiene applies to API delete only; queue/DLQ paths don't
