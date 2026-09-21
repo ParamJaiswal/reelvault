@@ -356,7 +356,7 @@ window.openReel = openReel;
 
 function factRow(f) {
   const ts = f.evidence_t_s != null ? fmtTs(f.evidence_t_s) : null;
-  const srcIcon = { transcript: "🗣️", ocr: "🖥️", caption: "📝", metadata: "⚙️", vision: "👁️" }[f.evidence_source] || "•";
+  const srcIcon = { transcript: "🗣️", ocr: "🖥️", caption: "📝", metadata: "⚙️", vision: "👁️", document: "📄" }[f.evidence_source] || "•";
   return `<tr>
     <td class="fact-field">${esc(f.field.replace(/_/g, " "))}</td>
     <td class="fact-val">${esc(f.value)}${f.user_corrected ? ' <span class="chip" style="font-size:10px">corrected</span>' : ""}
@@ -398,6 +398,7 @@ function detailHTML(r) {
     <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="editCategories()">✏️ categories</button>
     <span class="status-pill st-${esc(r.status)}">${esc(r.status)}</span></div>
   ${media || ""}
+  ${r.document && r.document.body_text ? `<div class="sec"><h4>Source text</h4><p class="doc-body" style="white-space:pre-wrap;max-height:220px;overflow:auto;font-size:13px;opacity:.92">${esc(r.document.body_text.slice(0, 4000))}</p></div>` : ""}
   <div class="conf" style="max-width:280px"><span>${fmtPct(r.confidence)}% confidence</span>
     <span class="meter"><i style="width:${fmtPct(r.confidence)}%"></i></span></div>
 

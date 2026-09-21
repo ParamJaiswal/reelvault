@@ -729,3 +729,20 @@ Findings:
 
 Next before trusting text extraction: N=3 protocol on text rows, then A/B
 the RV_LLM_BACKEND cloud seam on the same rows (owner approval needed).
+
+### N=3 repeat (text rows, same session)
+
+Runs 2 and 3 reproduced run 1 exactly for paper-01 (kept 4, fields 1/1) and
+xpost-01 (kept 9, fields 2/2). article-01 jitters kept 1↔3 and surfaced
+kept-unsupported facts (2) — the only unstable row.
+
+Correction to the note above: the "1 vs 9 facts" variance was NOT
+run-to-run model jitter. Eval harness pins schema (expected mode) and runs
+at temp 0 — deterministic. The spread came from comparing the *live routed*
+pipeline (classification picks schema; wrong schema = wrong fields) against
+the harness. Live routing is the variance source, which is exactly the
+predicted-schema gap Phase 8B was meant to close.
+
+unsupported_kept on text rows: 5 of 16 kept facts ride the short-value
+rescue (cap 0.75). Tolerated for now; revisit after trafilatura gives
+articles real text.

@@ -337,6 +337,10 @@ def reel_detail(reel_id: int, uid: int = Depends(require_auth)):
         card["ocr"] = [dict(x) for x in db.execute(
             "SELECT t_s, text, conf FROM ocr_results WHERE reel_id=?"
             " ORDER BY t_s", (reel_id,))]
+        doc = db.execute(
+            "SELECT body_text, source_url, mime_type FROM documents"
+            " WHERE reel_id=? LIMIT 1", (reel_id,)).fetchone()
+        card["document"] = dict(doc) if doc else None
         card["facts"] = [dict(x) for x in db.execute(
             "SELECT * FROM facts WHERE reel_id=? ORDER BY confidence DESC,"
             " field", (reel_id,))]
