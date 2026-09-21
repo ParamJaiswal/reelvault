@@ -21,8 +21,13 @@ class Settings(BaseSettings):
 
     # --- local model runtime ---
     llm_backend: str = "llamacpp"  # llamacpp | openai_compat | none
+    llm_text_backend: str = ""      # backend for text-only kinds when set
+                                    # (hybrid mode: video->llm_backend, text->this)
     llm_server_url: str = "http://127.0.0.1:8091/v1"
     llm_model_name: str = "qwen2.5-3b-instruct"
+    llm_cloud_server_url: str = ""   # openai_compat endpoint; empty = llm_server_url.
+                                     # Hybrid mode needs both at once.
+    llm_cloud_model_name: str = ""   # openai_compat model id; empty = llm_model_name
     llm_api_key: str = ""           # RV_LLM_API_KEY — openai_compat only; never log
     llm_ctx_tokens: int = 8192
     llm_max_tokens: int = 1400

@@ -1168,3 +1168,43 @@ Note: key was pasted into chat — recommend rotating it in the Groq console
 after testing.
 Next:
 - Run text-golden A/B vs the local 3B baseline; record in docs/EVAL.md.
+
+---
+
+Date: 2026-09-21 (hybrid routing)
+Phase: v2 per-kind LLM backend (branch `v2-hybrid-routing`)
+Done:
+- `providers.get_llm_for_kind(content_kind)`: text kinds (`x_post`, `article`,
+  `paper`, `note`) use `RV_LLM_TEXT_BACKEND`; `video` and `linkedin_post`
+  (can carry video) stay on `RV_LLM_BACKEND`. Empty text backend == today's
+  single-backend behavior, so v0.1 is unaffected by construction.
+- `TextFallbackProvider`: cloud-first, per-call fallback to the local backend,
+  so a 429 or an offline cloud tier cannot kill a job.
+- `RV_LLM_CLOUD_SERVER_URL` / `RV_LLM_CLOUD_MODEL_NAME`: the cloud provider
+  needed its own endpoint because hybrid runs llama-server and Groq at the
+  same time; both fall back to the shared settings when unset.
+- `router.classify/extract` take an optional injected provider; the classify
+  event's `served_by` now reports the real backend name (`llamacpp`,
+  `openai_compat`, `hybrid(...)`) instead of the hardcoded `qwen`, so
+  post-hoc debugging can tell who answered.
+Verification:
+- 318 tests pass, 2 skipped (12 new in `tests/test_hybrid_routing.py`: routing
+  table, fallback-on-error, unset-backend equivalence, endpoint split, and two
+  stage-level regressions that pin routing by the reel's own `content_kind`).
+- Live probe with the real Groq key: `video -> llamacpp
+  http://127.0.0.1:8091/v1`, `paper -> hybrid(openai_compat->llamacpp)` with
+  primary `https://api.groq.com/openai/v1` / `openai/gpt-oss-120b`; one cloud
+  chat call returned the expected JSON.
+Blockers:
+- OWNER STEP: hybrid needs `.env` changes (I do not write keys):
+  `RV_LLM_BACKEND=llamacpp`, `RV_LLM_TEXT_BACKEND=openai_compat`,
+  `RV_LLM_CLOUD_SERVER_URL=https://api.groq.com/openai/v1`,
+  `RV_LLM_CLOUD_MODEL_NAME=openai/gpt-oss-120b`, and `RV_LLM_SERVER_URL`
+  back to `http://127.0.0.1:8091/v1`.
+- Current `.env` sets `RV_LLM_MODEL_NAME=llama-3.3-70b-versatile`, which this
+  key does not serve — live calls 404. Use a `gpt-oss-*` id.
+- Groq key is still in this chat history: rotate it.
+Next:
+- Restart with the hybrid `.env`, ingest one paper and one video, confirm
+  `processing_events.data_json` shows `hybrid(...)` for the paper and
+  `llamacpp` for the video.

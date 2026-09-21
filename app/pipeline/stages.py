@@ -416,17 +416,19 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
     # ------- SLM classification + schema selection + extraction -------
     from app.ai.router import get_router
 
-    llm = providers.get_llm()
+    # Text-only kinds may be routed to a stronger cloud backend
+    # (RV_LLM_TEXT_BACKEND); unset = every kind on RV_LLM_BACKEND.
+    llm = providers.get_llm_for_kind(reel.get("content_kind") or "video")
     if not llm.available():
         raise RuntimeError("LLM server unreachable — is llama-server running?")
     router = get_router()
-    cls, served_by = router.classify(unified, reel_id=reel_id)
+    cls, served_by = router.classify(unified, reel_id=reel_id, llm=llm)
     cats = [c for c in cls.get("categories", [])][:4]
     schema_type = str(cls.get("primary_schema") or "generic").strip().lower()
     if schema_type not in SCHEMA_FIELDS:
         schema_type = "generic"  # never trust unvalidated model output
 
-    extraction = router.extract(unified, schema_type, reel_id=reel_id)
+    extraction = router.extract(unified, schema_type, reel_id=reel_id, llm=llm)
     if not extraction:
         raise ValueError("SLM returned unparseable JSON twice")
     raw_summary = extraction.get("summary") or ""

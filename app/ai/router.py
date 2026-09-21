@@ -154,7 +154,8 @@ class TaskRouter:
     """Stateless; safe across threads."""
 
     # ---------------------------------------------------------- classify
-    def classify(self, unified_text: str, reel_id: int | None = None) -> tuple[dict, str]:
+    def classify(self, unified_text: str, reel_id: int | None = None,
+                 llm=None) -> tuple[dict, str]:
         """Returns ({"categories": [...], "primary_schema": str}, served_by)."""
         messages = [{"role": "system", "content": _CLS_SYSTEM},
                     {"role": "user", "content": unified_text[:6000]}]
@@ -177,9 +178,9 @@ class TaskRouter:
                 except Exception as e:  # noqa: BLE001
                     log.warning("slm classify failed (%s) -> qwen", e)
 
-        llm = providers.get_llm()
+        llm = llm or providers.get_llm()
         obj: dict = {}
-        served_by = "qwen"
+        served_by = llm.name
         for attempt in range(2):  # one strict retry on parse failure
             raw = llm.chat(messages, max_tokens=120,
                            temperature=0,
@@ -196,7 +197,8 @@ class TaskRouter:
                     obj = {}
             if _valid_classification(obj):
                 break
-            served_by = "qwen(retry)" if attempt == 0 else "qwen(retry2)"
+            served_by = (f"{llm.name}(retry)" if attempt == 0
+                         else f"{llm.name}(retry2)")
         cats = (_normalize_categories(obj.get("categories"))
                 if isinstance(obj, dict) else [])
         if not cats:  # deterministic guardrail: never return nothing
@@ -214,9 +216,10 @@ class TaskRouter:
 
     # ----------------------------------------------------------- extract
     def extract(self, unified_text: str, schema_type: str,
-                reel_id: int | None = None) -> dict:
-        """Structured extraction. Qwen-only today by measurement."""
-        llm = providers.get_llm()
+                reel_id: int | None = None, llm=None) -> dict:
+        """Structured extraction. Caller may pass a per-kind provider;
+        otherwise the default backend serves."""
+        llm = llm or providers.get_llm()
         from app.knowledge.schemas import SCHEMA_FIELDS
 
         if schema_type != "generic" and schema_type in SCHEMA_FIELDS:

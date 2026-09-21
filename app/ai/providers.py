@@ -114,8 +114,12 @@ class OpenAICompatProvider:
 
     def __init__(self, base_url: str | None = None, model: str | None = None,
                  api_key: str | None = None):
-        self.base_url = (base_url or settings.llm_server_url).rstrip("/")
-        self.model = model or settings.llm_model_name
+        # RV_LLM_CLOUD_* exist so hybrid mode can run llama-server locally and
+        # a cloud endpoint at the same time; unset keeps the shared settings.
+        self.base_url = (base_url or settings.llm_cloud_server_url
+                         or settings.llm_server_url).rstrip("/")
+        self.model = (model or settings.llm_cloud_model_name
+                      or settings.llm_model_name)
         import os
         self.api_key = (api_key or settings.llm_api_key
                         or os.environ.get("RV_LLM_API_KEY", ""))
@@ -420,17 +424,67 @@ _ocr: OcrProvider | None = None
 _embedder: EmbeddingProvider | None = None
 
 
+def _build_backend(name: str) -> LLMProvider:
+    if name == "openai_compat":
+        return OpenAICompatProvider()
+    if name == "none":
+        raise RuntimeError("llm_backend=none — no LLM available")
+    return LlamaCppProvider()
+
+
 def get_llm() -> LLMProvider:
     global _llm
     if _llm is None:
-        backend = settings.llm_backend
-        if backend == "openai_compat":
-            _llm = OpenAICompatProvider()
-        elif backend == "none":
-            raise RuntimeError("llm_backend=none — no LLM available")
-        else:
-            _llm = LlamaCppProvider()
+        _llm = _build_backend(settings.llm_backend)
     return _llm
+
+
+# Hybrid routing (v2): kinds whose entire payload is text benefit from a
+# stronger cloud model; video/audio reels stay on the locally-tuned route
+# and never burn cloud quota. linkedin_post stays local — it can carry video.
+TEXT_KINDS = {"x_post", "article", "paper", "note"}
+
+
+class TextFallbackProvider:
+    """Cloud-first for text kinds; falls back to the default backend per
+    call so a rate-limited or offline cloud tier never kills a job."""
+
+    def __init__(self, primary: LLMProvider, fallback: LLMProvider):
+        self.primary = primary
+        self.fallback = fallback
+        self.name = f"hybrid({primary.name}->{fallback.name})"
+
+    def available(self) -> bool:
+        return self.primary.available() or self.fallback.available()
+
+    def chat(self, messages, max_tokens: int = 700, temperature: float = 0.2,
+             json_mode: bool = False, reel_id: int | None = None) -> str:
+        try:
+            return self.primary.chat(messages, max_tokens=max_tokens,
+                                     temperature=temperature,
+                                     json_mode=json_mode, reel_id=reel_id)
+        except Exception as e:  # noqa: BLE001
+            log.warning("text backend %s failed (%s) -> %s",
+                        self.primary.name, str(e)[:120], self.fallback.name)
+            return self.fallback.chat(messages, max_tokens=max_tokens,
+                                      temperature=temperature,
+                                      json_mode=json_mode, reel_id=reel_id)
+
+
+_llm_text: LLMProvider | None = None
+
+
+def get_llm_for_kind(content_kind: str) -> LLMProvider:
+    """Text kinds -> RV_LLM_TEXT_BACKEND (with fallback) when configured;
+    everything else -> the default backend. Empty text backend = today's
+    single-backend behavior (v0.1 compatible)."""
+    global _llm_text
+    if content_kind in TEXT_KINDS and settings.llm_text_backend:
+        if _llm_text is None:
+            _llm_text = TextFallbackProvider(
+                _build_backend(settings.llm_text_backend), get_llm())
+        return _llm_text
+    return get_llm()
 
 
 class AutoTranscriber:
