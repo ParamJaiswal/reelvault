@@ -153,6 +153,45 @@ def test_text_source_title_persisted(client, tmp_db):
     assert title == "Language Models are Few-Shot Learners"
 
 
+def test_doc_email_fact_uses_document_source(tmp_db, sample_user):
+    """Regression: regex-anchored email/URL facts on text reels must be
+    attributed to 'document', not 'transcript' (live finding, paper reel)."""
+    import json as _json
+    from app.db.schema import get_db
+    from app.pipeline import stages
+    from app.ai import providers
+
+    class FakeLLM:
+        name = "fake"
+        def available(self):
+            return True
+        def chat(self, messages, **kw):
+            return _json.dumps({"summary": "paper about attention",
+                                "key_takeaways": [], "action_items": [],
+                                "categories": ["AI/ML"], "facts": [],
+                                "entities": []})
+    providers_mod = stages.providers
+    orig = providers_mod.get_llm
+    providers_mod.get_llm = lambda: FakeLLM()
+    try:
+        with get_db() as db:
+            rid = db.execute(
+                "INSERT INTO reels(user_id, source_kind, content_kind, title,"
+                " status, current_stage) VALUES(?,'url','paper','P','processing','ocr')",
+                (sample_user,)).lastrowid
+            db.execute(
+                "INSERT INTO documents(reel_id, body_text) VALUES(?,"
+                " 'Contact aidan@cs.toronto.edu for the appendix')", (rid,))
+        stages.stage_classify_extract(rid, {})
+        with get_db() as db:
+            srcs = [row[0] for row in db.execute(
+                "SELECT evidence_source FROM facts WHERE reel_id=? AND field='email'",
+                (rid,))]
+    finally:
+        providers_mod.get_llm = orig
+    assert srcs and all(s == "document" for s in srcs), srcs
+
+
 def test_stage_media_and_transcribe_skip_for_text(tmp_db, sample_user):
     """Worker stages must no-op (not fail) when run for a text reel."""
     from app.db.schema import get_db

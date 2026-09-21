@@ -27,6 +27,38 @@ def _parse_doi(url: str) -> str | None:
     return m.group(1) if m else None
 
 
+MAX_PDF_BYTES = 25 * 1024 * 1024
+MAX_PDF_PAGES = 40
+
+
+def _pdf_body(pdf_url: str) -> str:
+    """Extract page-attributed text from an open-access PDF. Returns '' on
+    any failure — the abstract-only body is a valid fallback."""
+    if not pdf_url:
+        return ""
+    try:
+        import io
+
+        import pypdf
+        with httpx.stream("GET", pdf_url, timeout=60,
+                          follow_redirects=True) as r:
+            r.raise_for_status()
+            data = bytearray()
+            for chunk in r.iter_bytes():
+                data += chunk
+                if len(data) > MAX_PDF_BYTES:
+                    return ""
+        reader = pypdf.PdfReader(io.BytesIO(bytes(data)))
+        parts = []
+        for i, page in enumerate(reader.pages[:MAX_PDF_PAGES], start=1):
+            text = (page.extract_text() or "").strip()
+            if text:
+                parts.append(f"p.{i} {text}")
+        return "\n\n".join(parts)
+    except Exception:  # noqa: BLE001 — PDF is best-effort enrichment
+        return ""
+
+
 class PaperAdapter(IngestionAdapter):
     """Ingest research papers by arXiv ID or DOI."""
 
@@ -99,6 +131,9 @@ class PaperAdapter(IngestionAdapter):
             raise ValueError("Could not retrieve paper metadata.")
 
         body = f"{title}\n\n{abstract}"
+        pdf_text = _pdf_body(pdf_url)
+        if pdf_text:
+            body = f"{title}\n\n{abstract}\n\n{pdf_text}"
         return {
             "shortcode": arxiv_id or doi,
             "source_url": url,

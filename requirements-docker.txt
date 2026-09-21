@@ -14,3 +14,7 @@ numpy
 python-multipart
 python-dateutil
 cryptography
+# v2 multi-source: article body extraction (Apache-2.0) + OA PDF text
+# (BSD-3). PyMuPDF deliberately avoided: AGPL blocks APK shipping.
+trafilatura==2.2.0
+pypdf==6.19.0

@@ -412,11 +412,16 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
             "confidence": conf,
         })
     # regex-anchored facts always pass (deterministic evidence)
+    def _anchor_src(token: str) -> str:
+        if token in caption:
+            return "caption"
+        if doc_body and token in doc_body:
+            return "document"
+        return "transcript"
     for url in pre["urls"]:
         verified_facts.append({
             "schema_type": schema_type if schema_type != "generic" else "note",
-            "field": "link", "value": url, "evidence_source": "caption"
-            if url in caption else "transcript",
+            "field": "link", "value": url, "evidence_source": _anchor_src(url),
             "evidence_quote": url, "evidence_t_s": None,
             "confidence": 0.95,
         })
@@ -424,7 +429,7 @@ def stage_classify_extract(reel_id: int, payload: dict) -> None:
         verified_facts.append({
             "schema_type": schema_type if schema_type != "generic" else "note",
             "field": "email", "value": em,
-            "evidence_source": "caption" if em in caption else "transcript",
+            "evidence_source": _anchor_src(em),
             "evidence_quote": em, "evidence_t_s": None, "confidence": 0.95,
         })
     # Deterministic platform/skill recovery (Phase 7):
@@ -704,10 +709,16 @@ def build_spans(segs, ocrs, caption, doc_body: str = "") -> list[SourceSpan]:
         spans.append(SourceSpan(text=caption, t_s=None, source="caption"))
     if doc_body:
         # Split document into paragraph-sized chunks for evidence matching.
-        # Each chunk gets page=None (page locators added when PDF OCR runs).
-        paragraphs = [p.strip() for p in doc_body.split("\n\n") if p.strip()]
-        for para in paragraphs:
-            spans.append(SourceSpan(text=para, t_s=None, source="document"))
+        # Chunks prefixed "p.N " (PDF page marker from the paper adapter)
+        # carry N as their click-to-source page locator.
+        import re as _re
+        for para in [p.strip() for p in doc_body.split("\n\n") if p.strip()]:
+            m = _re.match(r"^p\.(\d{1,3})\s+", para)
+            if m:
+                spans.append(SourceSpan(text=para[m.end():], t_s=None,
+                                        source="document", page=int(m.group(1))))
+            else:
+                spans.append(SourceSpan(text=para, t_s=None, source="document"))
     return spans
 
 

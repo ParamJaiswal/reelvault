@@ -24,12 +24,18 @@ def _is_safe_url(url: str) -> bool:
             return False
         # Resolve hostname and check all addresses
         import socket
-        infos = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        try:
+            infos = socket.getaddrinfo(host, None, socket.AF_UNSPEC,
+                                       socket.SOCK_STREAM)
+        except socket.gaierror:
+            raise ValueError(f"Domain could not be resolved: {host}") from None
         for family, _, _, _, sockaddr in infos:
             ip = ipaddress.ip_address(sockaddr[0])
             if ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local:
                 return False
         return True
+    except ValueError:
+        raise
     except Exception:
         return False
 
@@ -82,9 +88,14 @@ class ArticleAdapter(IngestionAdapter):
             for _ in range(5):
                 if not _is_safe_url(url):
                     raise ValueError("URL resolves to a private or reserved address.")
+                # Browser UA: many news/sites 403 tool UAs (Wikipedia does);
+                # this is a single user-initiated fetch, not crawling.
                 r = httpx.get(
                     url, timeout=30, follow_redirects=False,
-                    headers={"User-Agent": "ReelVault/2.0 (+reelvault.local)"})
+                    headers={"User-Agent":
+                             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                             "AppleWebKit/537.36 (KHTML, like Gecko) "
+                             "Chrome/126.0 Safari/537.36"})
                 if r.status_code in (301, 302, 303, 307, 308):
                     loc = r.headers.get("location")
                     if not loc:
