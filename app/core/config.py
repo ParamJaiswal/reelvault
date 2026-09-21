@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -75,9 +75,8 @@ class Settings(BaseSettings):
     retention_media_days: int = 30    # 0 = keep forever
     default_keep_transcript: bool = True
 
-    class Config:
-        env_file = APP_ROOT / ".env"
-        env_prefix = "RV_"
+    model_config = SettingsConfigDict(env_file=str(APP_ROOT / ".env"),
+                                      env_prefix="RV_")
 
 
 settings = Settings()
