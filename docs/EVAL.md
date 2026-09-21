@@ -746,3 +746,21 @@ predicted-schema gap Phase 8B was meant to close.
 unsupported_kept on text rows: 5 of 16 kept facts ride the short-value
 rescue (cap 0.75). Tolerated for now; revisit after trafilatura gives
 articles real text.
+
+## Cloud A/B: Groq gpt-oss-120b vs local Qwen3B (text rows, 2026-09-21)
+
+`GOLDEN_FILTER=paper,xpost,article RV_LLM_MODEL_NAME=openai/gpt-oss-120b`
+(single run each; 429 backoff path exercised; gate assert is full-run only)
+
+| row | local kept/unsup | groq kept/unsup | fields | notes |
+|---|---|---|---|---|
+| paper-01 | 4/1 | 3/1 | both 1/1 | comparable; groq dropped 3 vs 2 |
+| xpost-01 | 9/2 | 7/0 | both 2/2 | groq cleaner: zero unsupported, exact Job category |
+| article-01 | 1-3/0-2 | 5/5 | — | RED FLAG: all 5 groq facts ride short-value rescue |
+
+Schema agreement 3/3 (groq) vs 3/3 (local, expected-mode). No winner overall:
+groq wins job-tweet precision; on the article it produces more facts but
+none quote-verified — rescue cap 0.75 doing the work, which is exactly the
+looseness §8 warns about. Decision: keep local as default for video (tuned +
+quota); cloud stays opt-in per .env. Action item: audit short-value rescue on
+document spans before trusting article-row facts.
