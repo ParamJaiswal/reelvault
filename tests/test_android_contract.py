@@ -20,22 +20,19 @@ def client(tmp_db):
 
 @pytest.fixture()
 def owner_password(tmp_db):
-    """ensure_owner_user writes the generated password to this file."""
+    """Force ensure_owner_user's credential-write path by clearing the hash
+    on a fresh DB. The fresh-install path creates a password but doesn't write
+    the cred file; the upgrade path does."""
     from app.core.config import settings
     from app.core import auth as A
-    row = A.ensure_owner_user()
-    p = Path(settings.data_dir) / ".owner_credentials.txt"
-    if p.exists():
-        for line in p.read_text(encoding="utf-8").splitlines():
-            if line.startswith("password:"):
-                return line.split(":", 1)[1].strip()
-    # Fresh install path: password was just generated, re-read from DB is not
-    # exposed; instead reset and let ensure_owner_user write it.
     from app.db.schema import get_db
+    A.ensure_owner_user()
     with get_db() as db:
+        row = db.execute("SELECT id FROM users LIMIT 1").fetchone()
         db.execute("UPDATE users SET password_hash=NULL, password_salt=NULL"
                    " WHERE id=?", (row["id"],))
     A.ensure_owner_user()
+    p = Path(settings.data_dir) / ".owner_credentials.txt"
     for line in p.read_text(encoding="utf-8").splitlines():
         if line.startswith("password:"):
             return line.split(":", 1)[1].strip()
@@ -45,8 +42,7 @@ def owner_password(tmp_db):
 @pytest.fixture()
 def viewer_token(client, owner_password):
     r = client.post("/api/auth/login",
-                    json={"username": "owner", "password": owner_password,
-                          "name": "test"})
+                    json={"username": "owner", "password": owner_password})
     assert r.status_code == 200, r.text
     body = r.json()
     for k in ("access_token", "refresh_token"):
@@ -54,10 +50,26 @@ def viewer_token(client, owner_password):
     return body["access_token"]
 
 
+@pytest.fixture()
+def refresh_token(client, owner_password):
+    r = client.post("/api/auth/login",
+                    json={"username": "owner", "password": owner_password})
+    assert r.status_code == 200
+    return r.json()["refresh_token"]
+
+
 def test_login_returns_tokens(client, owner_password):
     r = client.post("/api/auth/login",
-                    json={"username": "owner", "password": owner_password,
-                          "name": "apk"})
+                    json={"username": "owner", "password": owner_password})
+    assert r.status_code == 200
+    body = r.json()
+    assert "access_token" in body and "refresh_token" in body
+
+
+def test_refresh_returns_new_tokens(client, refresh_token):
+    """Repo.tryRefresh calls POST /api/auth/refresh with refresh_token."""
+    r = client.post("/api/auth/refresh",
+                    json={"refresh_token": refresh_token})
     assert r.status_code == 200
     body = r.json()
     assert "access_token" in body and "refresh_token" in body
@@ -79,23 +91,32 @@ def test_summaries_with_bearer(client, viewer_token):
                    headers={"Authorization": f"Bearer {viewer_token}"})
     assert r.status_code == 200
     body = r.json()
-    # Accept either a bare list or {"items": [...], "count": N} envelope.
-    assert isinstance(body, (list, dict))
-    if isinstance(body, dict):
-        assert "items" in body
+    assert isinstance(body, dict) and "items" in body
+
+
+def test_summaries_detail_shape(client, viewer_token):
+    """DetailActivity parses facts, evidence_quote, evidence_t_s, deadline_iso."""
+    r = client.get("/summaries?limit=1",
+                   headers={"Authorization": f"Bearer {viewer_token}"})
+    items = r.json().get("items", [])
+    if not items:
+        pytest.skip("no reels in test DB")
+    rid = items[0]["id"]
+    r = client.get(f"/summaries/{rid}",
+                   headers={"Authorization": f"Bearer {viewer_token}"})
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("facts", "summary"):
+        assert key in body, f"detail view must include '{key}'"
 
 
 def test_ingest_upload_multipart_field_name(client, viewer_token):
-    """Repo.uploadVideo sends multipart field 'file'. Server must match."""
+    """Repo.uploadStream sends multipart field 'file'. Server must accept it."""
     fake_mp4 = io.BytesIO(b"\x00" * 64)
     r = client.post("/ingest/upload",
                     headers={"Authorization": f"Bearer {viewer_token}"},
                     files={"file": ("clip.mp4", fake_mp4, "video/mp4")})
-    # Accept 200/202 (queued) or 422 if validation rejects the stub bytes;
-    # reject only if the field name itself is wrong (422 with our message).
-    assert r.status_code in (200, 202, 422), r.text
-    if r.status_code == 422:
-        assert "file" in r.text.lower() or "media" in r.text.lower()
+    assert r.status_code in (200, 202), r.text
 
 
 def test_ingest_upload_rejects_missing_file_field(client, viewer_token):
@@ -114,6 +135,4 @@ def test_ingest_url_accepts_bearer(client, viewer_token):
     r = client.post("/ingest/url",
                     headers={"Authorization": f"Bearer {viewer_token}"},
                     json={"url": "https://instagram.com/reel/TESTCONTRACT/"})
-    # 200/202 means path + auth are correct; 422 means URL validation ran
-    # (still proves the route exists and bearer was accepted).
     assert r.status_code in (200, 202, 422), r.text
