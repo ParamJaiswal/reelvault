@@ -1188,13 +1188,30 @@ Done:
   `openai_compat`, `hybrid(...)`) instead of the hardcoded `qwen`, so
   post-hoc debugging can tell who answered.
 Verification:
-- 318 tests pass, 2 skipped (12 new in `tests/test_hybrid_routing.py`: routing
-  table, fallback-on-error, unset-backend equivalence, endpoint split, and two
-  stage-level regressions that pin routing by the reel's own `content_kind`).
+- 322 tests pass, 2 skipped (16 in `tests/test_hybrid_routing.py`: routing
+  table, cloud-fail→local at wrapper and stage level, unset-backend
+  equivalence, endpoint split, keyless-config failure, cache rebuild, log
+  redaction, plus two stage regressions that route by the reel's own
+  `content_kind`).
 - Live probe with the real Groq key: `video -> llamacpp
   http://127.0.0.1:8091/v1`, `paper -> hybrid(openai_compat->llamacpp)` with
   primary `https://api.groq.com/openai/v1` / `openai/gpt-oss-120b`; one cloud
   chat call returned the expected JSON.
+Reviewer pass (Jev gate waived → cavecrew reviewer), findings fixed:
+- 🔴 the fallback `log.warning` interpolated a raw httpx exception string, which
+  can carry the `Authorization` header → now runs through `_sanitize_error`.
+- 🟠 a keyless `RV_LLM_TEXT_BACKEND=openai_compat` raised per call and silently
+  degraded to local, which reads as "hybrid is slow" rather than "hybrid is
+  misconfigured" → now fails loudly when the wrapper is built.
+- 🟠 the `_llm_text` cache pinned one backend name and one `get_llm()` result →
+  now keyed on the setting; `conftest` also stops every test inheriting the
+  owner's live `.env` routing (a real key there would turn unit tests into
+  cloud calls).
+- Accepted, not fixed: `served_by` records the route (`hybrid(cloud->local)`),
+  not which tier answered a given call — `ai_runs.backend` is the per-call
+  record, and the fallback logs when it fires.
+- Accepted: `note` has no producer yet; it matches the existing
+  `STAGE_PLANS["note"]` entry.
 Blockers:
 - OWNER STEP: hybrid needs `.env` changes (I do not write keys):
   `RV_LLM_BACKEND=llamacpp`, `RV_LLM_TEXT_BACKEND=openai_compat`,
