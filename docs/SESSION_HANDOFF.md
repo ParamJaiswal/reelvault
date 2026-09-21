@@ -1336,3 +1336,34 @@ Blockers:
 Next:
 - Add a golden row from reel 28's 15-page PDF, then re-extract reels 26/27/28 and
   confirm the boilerplate facts are gone.
+
+---
+
+Date: 2026-09-22
+Phase: v2-hybrid-routing — Android APK emulator verification + contract tests
+
+Done:
+- Installed Android emulator (system-images;android-34;google_apis;x86_64) via
+  sdkmanager with JAVA_HOME=D:\tools\jdk17. AVD rv_test created, boots with WHPX.
+- APK installed on emulator, login flow verified end-to-end: server URL
+  http://10.0.2.2:8756, owner credentials, summaries list displays 5 real reels
+  matching server API output exactly.
+- Upload endpoint verified: POST /ingest/upload with multipart field `file`
+  returns reel_id + queued status.
+- URL ingest verified: POST /ingest/url returns reel_id + queued status.
+- ShareIntakeActivity launches correctly on SEND intents; finishes after upload
+  (correct behavior). file:// URIs rejected as expected (real shares use content://).
+- New test file `tests/test_android_contract.py` (8 tests) pins the HTTP contract
+  the APK relies on: login tokens, bearer auth, upload field name, URL ingest,
+  summaries, healthz. All 8 pass.
+- Full suite: 344 passed, 0 failed, 2 skipped.
+Verification:
+- Emulator screenshots confirm login → summaries list with real data.
+- curl from host confirms upload (reel 30) and URL ingest (reel 31) queued.
+- pytest tests/test_android_contract.py -q → 8 passed.
+- pytest tests/ -q --ignore=tests/test_ai_eval.py → 344 passed, 2 skipped.
+Blockers:
+- None.
+Next:
+- Add multi-page-PDF golden row from reel 28 for document locality coverage.
+- Re-extract reels 26/27/28 to clear boilerplate facts (owner-authorized).
