@@ -749,6 +749,38 @@ def safe_json(raw: str, fallback: dict) -> dict:
     return fallback
 
 
+# Evidence matching needs document text in chunks a quote can be *local* to:
+# a whole PDF page (2800 chars) or a trafilatura article body (66,000 chars,
+# flat, no newlines) makes "this string occurs in the span" meaningless — see
+# evidence._document_containment_is_local and scripts/audit_rescue.py.
+DOC_SPAN_MAX_CHARS = 600
+_SENTENCE_RE = re.compile(r"[^.!?]*[.!?]+|[^.!?]+")   # no terminator: one chunk
+_PAGE_PREFIX_RE = re.compile(r"^p\.(\d{1,3})\s+")
+
+
+def _split_document(doc_body: str) -> list[tuple[int | None, str]]:
+    """(page, chunk) pairs. Paragraph breaks win; the remaining text is packed
+    into sentences up to DOC_SPAN_MAX_CHARS so a chunk is still readable."""
+    chunks: list[tuple[int | None, str]] = []
+    for para in [p.strip() for p in doc_body.split("\n\n") if p.strip()]:
+        m = _PAGE_PREFIX_RE.match(para)
+        page, text = (int(m.group(1)), para[m.end():]) if m else (None, para)
+        if len(text) <= DOC_SPAN_MAX_CHARS:
+            chunks.append((page, text))
+            continue
+        cur = ""
+        for s in [x.group(0).strip() for x in _SENTENCE_RE.finditer(text)
+                  if x.group(0).strip()]:
+            if cur and len(cur) + len(s) + 1 > DOC_SPAN_MAX_CHARS:
+                chunks.append((page, cur))
+                cur = s
+            else:
+                cur = f"{cur} {s}".strip()
+        if cur:
+            chunks.append((page, cur))
+    return chunks
+
+
 def build_spans(segs, ocrs, caption, doc_body: str = "") -> list[SourceSpan]:
     spans = [SourceSpan(text=s["text"], t_s=s["start_s"], source="transcript")
              for s in segs]
@@ -756,17 +788,8 @@ def build_spans(segs, ocrs, caption, doc_body: str = "") -> list[SourceSpan]:
     if caption:
         spans.append(SourceSpan(text=caption, t_s=None, source="caption"))
     if doc_body:
-        # Split document into paragraph-sized chunks for evidence matching.
-        # Chunks prefixed "p.N " (PDF page marker from the paper adapter)
-        # carry N as their click-to-source page locator.
-        import re as _re
-        for para in [p.strip() for p in doc_body.split("\n\n") if p.strip()]:
-            m = _re.match(r"^p\.(\d{1,3})\s+", para)
-            if m:
-                spans.append(SourceSpan(text=para[m.end():], t_s=None,
-                                        source="document", page=int(m.group(1))))
-            else:
-                spans.append(SourceSpan(text=para, t_s=None, source="document"))
+        spans += [SourceSpan(text=txt, t_s=None, source="document", page=pg)
+                  for pg, txt in _split_document(doc_body)]
     return spans
 
 

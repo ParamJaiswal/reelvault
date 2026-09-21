@@ -1,8 +1,8 @@
 """Evidence Ledger engine.
 
 For every fact the SLM extracts, we require a supporting quote. The quote is
-fuzzily matched back to transcript segments / OCR lines / caption. Match
-quality drives confidence:
+fuzzily matched back to transcript segments / OCR lines / caption / document
+chunks. Match quality drives confidence:
 
 conf = 0.35 * quote_similarity + 0.25 * has_timestamped_source
        + 0.2 * multiple_sources_agree + 0.2 * model_self_confidence
@@ -15,6 +15,14 @@ conf = 0.45 * quote_similarity + 0.35 * multiple_sources_agree
 
 If no source matches at all (>0.45 sim), the fact is DROPPED as likely
 hallucination and logged. This is the anti-hallucination backbone.
+
+Verbatim containment is capped by the size of the document chunk that contains
+it (_containment_is_local): inside a chunk far larger than the match, the source
+merely happens to include those words, which is weak support (0.75) at best and
+no support at all for the short-value doors. That is what stops a PDF page or an
+article chunk from authenticating any claim that uses one of its words.
+Transcript, OCR and caption spans are short by nature and keep their tuned
+behavior.
 """
 from __future__ import annotations
 
@@ -102,6 +110,28 @@ class EvidenceMatch:
 
 JACCARD_MIN = 0.20  # min word-set overlap before char-level matching runs
 
+MIN_QUOTE_CHARS = 15  # shorter normalized text can't be verified reliably
+MIN_VALUE_CHARS = 6   # short-value rescue floor: "Zylker" qualifies, "AI" does not
+
+# Verbatim containment inside a DOCUMENT chunk is evidence only when the chunk
+# is small enough that the match says something about the claim. PDF pages run
+# ~2800 characters and an article body reached 66,000 before documents were
+# chunked, so they contain almost any short phrase by accident: the live library
+# carried difficulty='Research' and topic='Transformer model' on the arXiv
+# license-boilerplate page, and because the probe cleared MIN_QUOTE_CHARS `_sim`
+# scored that a perfect match. Calibrated on the live library — the same test on
+# transcript/OCR/caption spans removes genuine facts, so the budget is applied
+# to document chunks only. See scripts/audit_rescue.py, docs/EVAL.md.
+CONTAINMENT_SPAN_CHARS_PER_MATCHED = 20
+CONTAINMENT_SPAN_CHARS_SLACK = 120
+
+
+def _containment_is_local(matched: str, span_norm: str) -> bool:
+    """True when a span containing `matched` is small enough for the
+    containment to be informative rather than incidental vocabulary."""
+    return len(span_norm) <= (CONTAINMENT_SPAN_CHARS_PER_MATCHED * len(matched)
+                              + CONTAINMENT_SPAN_CHARS_SLACK)
+
 
 def _jaccard(a: str, b: str) -> float:
     """Word-set Jaccard between two already-normalized strings."""
@@ -111,21 +141,30 @@ def _jaccard(a: str, b: str) -> float:
     return len(sa & sb) / len(sa | sb)
 
 
-def _sim(a: str, b: str) -> float:
+def _ratio(a: str, b: str) -> float:
+    """Char-level similarity with the low-overlap prefilter: spans sharing
+    almost no vocabulary with the probe cannot reach the 0.45 hallucination
+    threshold, so skip the O(len^2) SequenceMatcher for them."""
     if not a or not b:
         return 0.0
-    if a in b:
-        return 1.0
-    # Pre-filter: spans sharing almost no vocabulary with the probe cannot
-    # reach the 0.45 hallucination threshold via char ratio, so skip the
-    # O(len^2) SequenceMatcher for them (set ops are O(words)).
     if _jaccard(a, b) < JACCARD_MIN:
         return 0.0
     return SequenceMatcher(None, a, b).ratio()
 
 
-MIN_QUOTE_CHARS = 15  # shorter normalized text can't be verified reliably
-MIN_VALUE_CHARS = 6   # short-value rescue floor: "Zylker" qualifies, "AI" does not
+def _sim(a: str, b: str, containment_must_be_local: bool = False) -> float:
+    """How present a claimed QUOTE is in a span. For document chunks
+    (`containment_must_be_local`), verbatim presence is proof only when the
+    chunk is about the size of the quote; a larger chunk makes the same
+    presence the designed weak support (0.75). Transcript, OCR and caption
+    spans keep their tuned behavior."""
+    if not a or not b:
+        return 0.0
+    if len(a) >= MIN_QUOTE_CHARS and a in b:
+        if containment_must_be_local and not _containment_is_local(a, b):
+            return 0.75
+        return 1.0
+    return _ratio(a, b)
 
 
 def _phrase_in_tokens(hay: list[str], needle: list[str]) -> bool:
@@ -154,13 +193,17 @@ def _short_value_match(value_norm: str,
     best: SourceSpan | None = None
     agree = 0
     for sp in spans:
-        if _phrase_in_tokens(norm(sp.text).split(), vt):
-            agree += 1
-            # prefer a timestamped span so click-to-seek works, then longer text
-            if best is None or (sp.t_s is not None
-                                and (best.t_s is None
-                                     or len(sp.text) > len(best.text))):
-                best = sp
+        sn = norm(sp.text)
+        if not _phrase_in_tokens(sn.split(), vt):
+            continue
+        if sp.source == "document" and not _containment_is_local(value_norm, sn):
+            continue
+        agree += 1
+        # prefer a timestamped span so click-to-seek works, then longer text
+        if best is None or (sp.t_s is not None
+                            and (best.t_s is None
+                                 or len(sp.text) > len(best.text))):
+            best = sp
     if best is None:
         return None
     return EvidenceMatch(similarity=0.75, span=best, n_sources_agreeing=agree)
@@ -238,9 +281,12 @@ def find_evidence(quote: str, value: str, spans: list[SourceSpan]) -> EvidenceMa
         # lexical prerequisite, not a semantic entailment guarantee.
         if not claim_terms or not claim_terms <= _claim_terms(sp.text):
             continue
-        s = max(_sim(probe, sn), _sim(alt, sn))
-        # value tokens appearing in span counts as weak support
-        if vn and vn in sn:
+        local_only = sp.source == "document"
+        s = max(_sim(probe, sn, local_only), _sim(alt, sn, local_only))
+        # value present verbatim counts as weak support — but inside a document
+        # chunk only when that chunk is small enough to be about the value
+        if vn and vn in sn and not (local_only
+                                    and not _containment_is_local(vn, sn)):
             s = max(s, 0.75)
         if s >= 0.55:
             agree += 1
