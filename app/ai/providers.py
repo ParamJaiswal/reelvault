@@ -464,26 +464,41 @@ class TextFallbackProvider:
                                      temperature=temperature,
                                      json_mode=json_mode, reel_id=reel_id)
         except Exception as e:  # noqa: BLE001
-            log.warning("text backend %s failed (%s) -> %s",
-                        self.primary.name, str(e)[:120], self.fallback.name)
+            # httpx exception strings can carry the request, key included.
+            log.warning("text backend %s failed (%s) -> %s", self.primary.name,
+                        _sanitize_error(str(e))[:120], self.fallback.name)
             return self.fallback.chat(messages, max_tokens=max_tokens,
                                       temperature=temperature,
                                       json_mode=json_mode, reel_id=reel_id)
 
 
-_llm_text: LLMProvider | None = None
+_llm_text: tuple[str, LLMProvider] | None = None
+
+
+def _get_text_backend() -> LLMProvider:
+    """Build (once per configured backend name) the cloud-first wrapper."""
+    global _llm_text
+    name, default = settings.llm_text_backend, get_llm()
+    if _llm_text is None or _llm_text[0] != name:
+        primary = _build_backend(name)
+        if isinstance(primary, OpenAICompatProvider) and not primary.api_key:
+            raise RuntimeError("RV_LLM_TEXT_BACKEND=openai_compat needs "
+                               "RV_LLM_API_KEY — hybrid mode is not configured")
+        if getattr(primary, "base_url", None) == getattr(default, "base_url", None):
+            # Both tiers address one endpoint: routing changes nothing, which
+            # usually means RV_LLM_CLOUD_SERVER_URL was left unset.
+            log.warning("hybrid routing is a no-op: text and default backend "
+                        "share endpoint %s", primary.base_url)
+        _llm_text = (name, TextFallbackProvider(primary, default))
+    return _llm_text[1]
 
 
 def get_llm_for_kind(content_kind: str) -> LLMProvider:
     """Text kinds -> RV_LLM_TEXT_BACKEND (with fallback) when configured;
     everything else -> the default backend. Empty text backend = today's
     single-backend behavior (v0.1 compatible)."""
-    global _llm_text
     if content_kind in TEXT_KINDS and settings.llm_text_backend:
-        if _llm_text is None:
-            _llm_text = TextFallbackProvider(
-                _build_backend(settings.llm_text_backend), get_llm())
-        return _llm_text
+        return _get_text_backend()
     return get_llm()
 
 

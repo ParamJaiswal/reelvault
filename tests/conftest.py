@@ -13,6 +13,22 @@ os.environ.setdefault("RV_DB_PATH", str(Path(_TMP) / "test.db"))
 os.environ.setdefault("RV_DATA_DIR", _TMP)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_llm_routing(monkeypatch):
+    """Stage tests must not inherit the owner's live .env: a real key plus
+    RV_LLM_TEXT_BACKEND there would turn unit tests into cloud calls. Tests
+    that exercise routing patch the setting themselves."""
+    from app.core.config import settings
+    from app.ai import providers
+
+    monkeypatch.setattr(settings, "llm_text_backend", "", raising=False)
+    providers._llm = None
+    providers._llm_text = None
+    yield
+    providers._llm = None
+    providers._llm_text = None
+
+
 @pytest.fixture()
 def tmp_db(monkeypatch):
     """Fresh DB per test."""

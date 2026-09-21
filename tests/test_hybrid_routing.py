@@ -10,21 +10,12 @@ from unittest.mock import patch
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _reset_singletons():
-    import app.ai.providers as mod
-    mod._llm = None
-    mod._llm_text = None
-    yield
-    mod._llm = None
-    mod._llm_text = None
-
-
 class FakeBackend:
-    def __init__(self, name, reply="ok", fail=False):
+    def __init__(self, name, reply="ok", fail=False, base_url=None):
         self.name = name
         self.reply = reply
         self.fail = fail
+        self.base_url = base_url or f"http://{name}/v1"
         self.calls = []
 
     def available(self):
@@ -186,4 +177,82 @@ def test_stage_serves_text_reel_from_cloud_when_configured(tmp_db, sample_user):
         rows = [dict(r) for r in db.execute(
             "SELECT data_json FROM processing_events WHERE reel_id=?"
             " AND stage='classify_extract'", (rid,))]
-    assert any("cloud" in (r["data_json"] or "") for r in rows), rows
+    assert any('"served_by": "hybrid(cloud->llamacpp)"' in (r["data_json"] or "")
+               for r in rows), rows
+
+
+def test_stage_survives_cloud_failure_by_serving_from_local(tmp_db, sample_user):
+    """The point of the wrapper: a 429 must degrade the note to local, not
+    fail the job."""
+    from app.pipeline import stages
+    import app.ai.providers as mod
+
+    cloud = FakeBackend("cloud", fail=True, reply=_reply())
+    local = FakeBackend("llamacpp", reply=_reply())
+    rid = _mk_reel(sample_user, "paper")
+    with patch.object(mod.settings, "llm_text_backend", "cloud"), \
+            patch.object(mod.settings, "slm_enabled", False), \
+            patch.object(mod, "get_llm", lambda: local), \
+            patch.object(mod, "_build_backend", lambda name: cloud):
+        stages.stage_classify_extract(rid, {})
+
+    assert cloud.calls and local.calls, "expected cloud attempt then local serve"
+    from app.db.schema import get_db
+    with get_db() as db:
+        status = db.execute("SELECT status FROM reels WHERE id=?",
+                            (rid,)).fetchone()[0]
+    assert status == "processing"  # stage completed; worker decides next stage
+
+
+def test_fallback_warning_never_carries_the_key(caplog):
+    """The fallback path logs str(exception) — httpx embeds the Authorization
+    header in it, so the log line must be redacted."""
+    import logging
+    from app.ai.providers import TextFallbackProvider
+
+    class KeyLeakingBackend:
+        name = "leaky"
+        base_url = "https://api.groq.com/openai/v1"
+
+        def available(self):
+            return True
+
+        def chat(self, messages, **kw):
+            raise RuntimeError("Illegal header value b'Bearer SECRETKEY123'")
+
+    local = FakeBackend("local")
+    hybrid = TextFallbackProvider(KeyLeakingBackend(), local)
+    with caplog.at_level(logging.WARNING, logger="rv.ai"):
+        hybrid.chat([{"role": "user", "content": "hi"}])
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "SECRETKEY123" not in logged
+    assert "REDACTED" in logged
+
+
+def test_text_backend_without_key_fails_loudly(monkeypatch):
+    """Hybrid configured but no credentials = a config error, not a silent
+    per-call downgrade to the local model."""
+    import app.ai.providers as mod
+    monkeypatch.setattr(mod.settings, "llm_api_key", "")
+    monkeypatch.delenv("RV_LLM_API_KEY", raising=False)
+    with patch.object(mod.settings, "llm_text_backend", "openai_compat"), \
+            patch.object(mod.settings, "llm_backend", "llamacpp"):
+        with pytest.raises(RuntimeError, match="needs RV_LLM_API_KEY"):
+            mod.get_llm_for_kind("paper")
+
+
+def test_changing_text_backend_rebuilds_the_wrapper():
+    """The cached wrapper is keyed on the backend name, so a config change
+    cannot leave a stale provider serving every text reel."""
+    from app.ai.providers import get_llm_for_kind
+    import app.ai.providers as mod
+
+    a, b = FakeBackend("a"), FakeBackend("b")
+    local = FakeBackend("llamacpp")
+    builders = {"a": a, "b": b}
+    with patch.object(mod, "get_llm", lambda: local), \
+            patch.object(mod, "_build_backend", lambda name: builders[name]):
+        with patch.object(mod.settings, "llm_text_backend", "a"):
+            assert get_llm_for_kind("paper").primary is a
+        with patch.object(mod.settings, "llm_text_backend", "b"):
+            assert get_llm_for_kind("paper").primary is b
