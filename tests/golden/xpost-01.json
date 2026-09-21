@@ -1,0 +1,29 @@
+{
+  "id": "xpost-01",
+  "kind": "x_post",
+  "description": "Hiring tweet with hard facts; short-form text source.",
+  "caption": "We're hiring 2 senior backend engineers (remote, Bengaluru, 5-8 yrs, INR 30-45 LPA). Apply by September 30 at careers.acme.dev - Python, FastAPI.",
+  "transcript": [],
+  "ocr": [],
+  "document": "We're hiring 2 senior backend engineers (remote, Bengaluru, 5-8 yrs, INR 30-45 LPA). Apply by September 30 at careers.acme.dev - Python, FastAPI.",
+  "expected": {
+    "categories": [
+      "Job",
+      "Career"
+    ],
+    "primary": [
+      "Job"
+    ],
+    "schema": "job",
+    "fields": {
+      "role": [
+        "backend"
+      ],
+      "location": [
+        "bengaluru"
+      ]
+    },
+    "deadlines": [],
+    "min_facts_kept": 2
+  }
+}

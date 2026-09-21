@@ -1,0 +1,25 @@
+{
+  "id": "article-01",
+  "kind": "article",
+  "description": "How-to article body with concrete steps and figures.",
+  "caption": "Five ways to cut your electricity bill",
+  "transcript": [],
+  "ocr": [],
+  "document": "Five ways to cut your electricity bill\n\nCleaning solar panels once a quarter can recover up to 15 percent of lost output, according to a 2024 study. Dust and pollen form an insulating layer that blocks sunlight before it reaches the cells.\n\nSet your air conditioner to 24 degrees Celsius instead of 20; each degree warmer saves roughly 6 percent on cooling costs. A smart power strip stops phantom loads from consoles and routers, which can account for 10 percent of a household bill.",
+  "expected": {
+    "categories": [
+      "Educational",
+      "Tutorial",
+      "Finance",
+      "Productivity"
+    ],
+    "primary": [
+      "Educational",
+      "Tutorial"
+    ],
+    "schema": "generic",
+    "fields": {},
+    "deadlines": [],
+    "min_facts_kept": 1
+  }
+}

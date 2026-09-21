@@ -53,8 +53,11 @@ def _unified_and_spans(g: dict):
                            for s in g.get("transcript", []))
     overlay = "\n".join(f"[{_fmt_ts(o['t'])}] OCR: {o['text']}"
                         for o in g.get("ocr", []))
+    doc_body = g.get("document") or ""
     unified = (f"CAPTION: {caption}\n\nTRANSCRIPT:\n{transcript or '(no speech detected)'}"
                f"\n\nON-SCREEN TEXT:\n{overlay or '(none)'}")
+    if doc_body:
+        unified += f"\n\nDOCUMENT:\n{doc_body[:10000]}"
 
     spans = [SourceSpan(text=s["text"], t_s=s["t"], source="transcript")
              for s in g.get("transcript", [])]
@@ -62,6 +65,10 @@ def _unified_and_spans(g: dict):
               for o in g.get("ocr", [])]
     if caption:
         spans.append(SourceSpan(text=caption, t_s=None, source="caption"))
+    if doc_body:
+        # Mirror build_spans: paragraph chunks, source='document'.
+        spans += [SourceSpan(text=p.strip(), t_s=None, source="document")
+                  for p in doc_body.split("\n\n") if p.strip()]
     return unified, spans
 
 

@@ -696,3 +696,36 @@ Mean per-reel latency: 10.4s (classify 0.7s + extract 9.7s).
 Any prompt, model, OCR, STT, evidence-matcher, or schema change must re-run
 this eval and compare against the table above. A regression requires an
 explanation or a reversion.
+
+---
+
+## Text-source baseline (v2), 2026-09-21, N=1 run, Qwen2.5-3B local
+
+First golden rows for new kinds: `paper-01` (real arXiv GPT-3 abstract),
+`xpost-01` (hiring tweet), `article-01` (how-to article). Harness gained
+`document` field support mirroring `build_spans` paragraph chunking.
+
+| id | kept/dropped | unsupported | fields | schema | gate |
+|---|---|---|---|---|---|
+| paper-01 | 4/2 | 1 | 1/1 | education/education | pass |
+| xpost-01 | 9/2 | 2 | 2/2 (role, location) | job/job | pass |
+| article-01 | 1/0 | 0 | — | generic→Educational relabelled | pass (min 1) |
+
+Aggregate with 19 items: field recall 0.792, min_facts_kept_rate 0.895,
+unsupported_kept_rate 0.063, deadline parse_recall 1.0, malformed JSON 0.
+
+Findings:
+- Matcher is NOT the text-source bottleneck: verbatim document quotes score
+  1.0; live-run drops were genuine model paraphrases (§9 error analysis,
+  2026-09-21).
+- Model IS the bottleneck: article-01 yielded 1 fact from a numbers-dense
+  body; paper quotes get paraphrased; xpost variance 1..9 facts across runs
+  (single live ingest kept 1, eval run kept 9 on equivalent text). N≥3
+  repeat protocol required before any quality claim.
+- xpost/paper each kept 1-2 "unsupported" facts via short-value rescue —
+  watch: rescue cap 0.75 is doing its job but text sources raise its usage.
+- article-01 expected categories relabelled (Educational primary) after
+  human review of prediction — labels, not model, were wrong.
+
+Next before trusting text extraction: N=3 protocol on text rows, then A/B
+the RV_LLM_BACKEND cloud seam on the same rows (owner approval needed).
