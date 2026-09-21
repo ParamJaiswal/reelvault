@@ -1188,16 +1188,16 @@ Done:
   `openai_compat`, `hybrid(...)`) instead of the hardcoded `qwen`, so
   post-hoc debugging can tell who answered.
 Verification:
-- 322 tests pass, 2 skipped (16 in `tests/test_hybrid_routing.py`: routing
+- 324 tests pass, 2 skipped (17 in `tests/test_hybrid_routing.py`: routing
   table, cloud-fail→local at wrapper and stage level, unset-backend
-  equivalence, endpoint split, keyless-config failure, cache rebuild, log
-  redaction, plus two stage regressions that route by the reel's own
-  `content_kind`).
+  equivalence, endpoint split + shared-endpoint no-op warning,
+  keyless-config dead-letter, cache rebuild, log redaction, plus two stage
+  regressions that route by the reel's own `content_kind`).
 - Live probe with the real Groq key: `video -> llamacpp
   http://127.0.0.1:8091/v1`, `paper -> hybrid(openai_compat->llamacpp)` with
   primary `https://api.groq.com/openai/v1` / `openai/gpt-oss-120b`; one cloud
-  chat call returned the expected JSON.
-Reviewer pass (Jev gate waived → cavecrew reviewer), findings fixed:
+  chat call returned the expected JSON. Re-run after every fix; same result.
+Reviewer pass 1 (Jev gate waived → cavecrew reviewer), findings fixed:
 - 🔴 the fallback `log.warning` interpolated a raw httpx exception string, which
   can carry the `Authorization` header → now runs through `_sanitize_error`.
 - 🟠 a keyless `RV_LLM_TEXT_BACKEND=openai_compat` raised per call and silently
@@ -1212,6 +1212,19 @@ Reviewer pass (Jev gate waived → cavecrew reviewer), findings fixed:
   record, and the fallback logs when it fires.
 - Accepted: `note` has no producer yet; it matches the existing
   `STAGE_PLANS["note"]` entry.
+Reviewer pass 2 (on the fix diff), findings fixed:
+- 🟡 the keyless-hybrid `RuntimeError` was retryable, so every text job burned
+  the three-attempt backoff ladder before dead-lettering → now raises
+  `PermanentJobError`, the repo's existing dead-once idiom.
+- 🟡 `_BEARER_RE` stopped at the first `+`, `/` or `=`, so a standard-base64
+  bearer token left its tail in the log → widened the character class, with a
+  `test_error_sanitization_strips_base64_bearer` regression test.
+- 🔵 the no-op warning logged `primary.base_url` while guarding with
+  `getattr(..., None)` → now compares one local and skips when absent.
+- Confirmed clean by the reviewer: the `RuntimeError("LLM backend …
+  unreachable")` message change matches nothing downstream (worker/DLQ, UI,
+  tests, docs); `served_by` is only counted, never compared to `"qwen"`; the
+  conftest isolation masks no production path; no `agents.md` scope breach.
 Blockers:
 - OWNER STEP: hybrid needs `.env` changes (I do not write keys):
   `RV_LLM_BACKEND=llamacpp`, `RV_LLM_TEXT_BACKEND=openai_compat`,
