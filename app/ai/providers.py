@@ -145,11 +145,30 @@ class OpenAICompatProvider:
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         t0 = time.time()
+        # httpx error strings embed the full request INCLUDING the Authorization
+        # header — never store str(e) raw; extract only the server's own message.
+        def _err_text(exc: Exception) -> str:
+            resp = getattr(exc, "response", None)
+            if resp is not None:
+                try:
+                    return str(resp.json().get("error", ""))[:500]
+                except Exception:  # noqa: BLE001
+                    return (resp.text or "")[:500]
+            return f"{type(exc).__name__}: {str(exc)[:200]}"
+
         try:
             for attempt in range(4):
                 r = httpx.post(
                     f"{self.base_url}/chat/completions", json=body, timeout=120,
                     headers={"Authorization": f"Bearer {self.api_key}"})
+                if r.status_code == 400 and json_mode:
+                    # gpt-oss strict JSON validation rejects our prompts even
+                    # with the 'json' keyword present; the fenced-JSON parser
+                    # handles it. Retry once without the server constraint.
+                    log.info("backend 400 on response_format — retrying without")
+                    body.pop("response_format", None)
+                    json_mode = False
+                    continue
                 if r.status_code == 429 and attempt < 3:
                     # Free-tier TPM ceiling: honor Retry-After, then try again.
                     # The durable queue's own backoff is the outer safety net.
@@ -158,16 +177,22 @@ class OpenAICompatProvider:
                     time.sleep(wait)
                     continue
                 r.raise_for_status()
-                text = r.json()["choices"][0]["message"]["content"]
+                msg = r.json()["choices"][0]["message"]
+                text = (msg.get("content") or "").strip()
+                if not text and msg.get("reasoning"):
+                    # gpt-oss spends max_tokens on hidden reasoning -> empty
+                    # content. One doubled-budget retry.
+                    body["max_tokens"] = min(4000, int(body.get("max_tokens", 700)) * 2)
+                    continue
                 usage = r.json().get("usage", {})
                 _record_run("llm.chat", self.name, self.model, t0, True,
                             reel_id=reel_id, tokens_in=usage.get("prompt_tokens"),
                             tokens_out=usage.get("completion_tokens"))
                 return text
-            raise RuntimeError("LLM API kept rate-limiting (429 x4)")
+            raise RuntimeError("LLM API returned no usable completion (429/rate-limit or empty content x4)")
         except Exception as e:  # noqa: BLE001
             _record_run("llm.chat", self.name, self.model, t0, False,
-                        reel_id=reel_id, error=str(e))
+                        reel_id=reel_id, error=_err_text(e))
             raise
 
 

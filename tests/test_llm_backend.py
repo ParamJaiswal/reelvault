@@ -40,19 +40,21 @@ def test_get_llm_none_raises():
     mod._llm = None
 
 
-def test_openai_compat_requires_api_key():
-    """OpenAICompatProvider.chat must refuse without RV_LLM_API_KEY."""
-    from app.ai.providers import OpenAICompatProvider
-    p = OpenAICompatProvider(api_key="")
+def test_openai_compat_requires_api_key(monkeypatch):
+    """OpenAICompatProvider.chat must refuse without any key source."""
+    import app.ai.providers as mod
+    monkeypatch.setattr(mod.settings, "llm_api_key", "")
+    monkeypatch.delenv("RV_LLM_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="RV_LLM_API_KEY not set"):
-        p.chat([{"role": "user", "content": "hi"}])
+        mod.OpenAICompatProvider(api_key="").chat(
+            [{"role": "user", "content": "hi"}])
 
 
-def test_openai_compat_available_without_key():
+def test_openai_compat_available_without_key(monkeypatch):
     """available() returns False when no key, doesn't crash."""
-    from app.ai.providers import OpenAICompatProvider
-    p = OpenAICompatProvider(api_key="")
-    assert p.available() is False
+    import app.ai.providers as mod
+    monkeypatch.setattr(mod.settings, "llm_api_key", "")
+    assert mod.OpenAICompatProvider(api_key="").available() is False
 
 
 def test_openai_compat_reads_settings_key(tmp_db):
