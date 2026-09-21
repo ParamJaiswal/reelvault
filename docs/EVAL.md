@@ -767,23 +767,25 @@ document spans before trusting article-row facts.
 
 ---
 
-## Evidence audit: verbatim containment inside document chunks (2026-09-21)
+## Evidence audit: verbatim containment inside a document span (2026-09-21)
 
 The cloud A/B left one action item: "audit short-value rescue on document spans
-before trusting article-row facts." Done, with two reusable instruments.
+before trusting article-row facts." Done, with two reusable instruments and one
+narrow rule.
 
 ### Measurement
 
-`scripts/audit_rescue.py` (read-only, runs on the live library): every extracted
-fact value is offered as a probe to every reel it did NOT come from. A hit on a
-foreign reel is a value that containment alone would have authenticated using
-someone else's source text.
+`scripts/audit_rescue.py` (read-only, runs against the live library) offers every
+extracted fact value to every reel it did NOT come from. A hit on a foreign reel
+is a value that containment alone would have authenticated using someone else's
+source text — the false-accept rate of the door, grouped by the span source that
+carried it, because that is what the rule keys on:
 
 ```
 FOREIGN values - containment that would authenticate someone else's claim:
-  document    hits   11   shipped rule admits    4   uniform budget would admit    4
   ocr         hits   10   shipped rule admits   10   uniform budget would admit    3
   caption     hits    8   shipped rule admits    8   uniform budget would admit    1
+  document    hits    8   shipped rule admits    0   uniform budget would admit    0
   transcript  hits    7   shipped rule admits    7   uniform budget would admit    7
 
 OWN values - support the budget could cost:
@@ -793,87 +795,91 @@ OWN values - support the budget could cost:
   document    hits    4   shipped rule admits    1   uniform budget would admit    1
 ```
 
-Read it as: on document chunks the rule removes 7 of 11 foreign false accepts and
-3 of 4 own-source containment crutches, while video spans keep exactly the
-support Phases 4/6/7 tuned. The "uniform budget" column is why the rule is
-document-scoped: the same budget applied everywhere would cost 11 of 17 real
-caption hits and 2 of 22 OCR hits for no additional gain.
+On document spans the rule removes all 8 foreign false accepts and 3 of the 4
+own-source crutches; transcript, OCR and caption support is untouched. The
+"uniform budget" column is why the scope is documents-only: applying the same test
+everywhere would discard 11 of 17 genuine caption hits for no additional gain.
 
 ### The three facts that started it
 
 ```
-reel 26 (paper)   difficulty='Research'          matched spans: 2810, 3012, 3081 chars
-reel 27 (article) difficulty='Difficult'         matched span:  65654 chars (whole body)
-reel 28 (paper)   topic='Transformer model'      matched spans: 2810, 3091 chars
+reel 26 (paper)   difficulty='Research'          contained in spans of 2810, 3012, 3081 chars
+reel 27 (article) difficulty='Difficult'         contained in a 10,000-char span (truncated body)
+reel 28 (paper)   topic='Transformer model'      contained in spans of 2810, 3091 chars
 ```
 
-The first two matched the arXiv license-boilerplate page; all three survive on
-vocabulary. The legitimate neighbour, `topic='Attention Is All You Need'` on the
-same reel, is kept because the title is its own 25-character chunk.
+The first two matched the arXiv license-boilerplate page. After the change,
+replaying them against the stored sources gives
+`Research` 0.0 and `Difficult` 0.0 (dropped), `Transformer model` 0.75 (kept, no
+longer claimed as strong), and the legitimate `topic='Attention Is All You Need'`
+on the same reel keeps 1.0.
 
 ### Three doors, not one
 
-The rescue path was only the first:
+The rescue path named in the A/B note was only the first:
 
 - **A** `evidence._short_value_match` — quote AND value under `MIN_QUOTE_CHARS`;
   returned a flat 0.75 for containment in a span of any size.
 - **B** `find_evidence`'s `value in span -> max(s, 0.75)` boost — any value
-  length, on whichever span the loop was examining.
+  length, on whichever span the loop happened to be examining.
 - **C** `_sim`'s verbatim shortcut — `a in b` returned **1.0** with no floor on
   probe length and no regard for span size. This is the door that made
-  `difficulty='Research'` look like *strong* evidence rather than weak, and it
-  is what the A/B's article facts rode.
+  `difficulty='Research'` look like *strong* evidence, and it is what the A/B's
+  article facts travelled. The module docstring had promised verbatim containment
+  was "designed weak support (0.75, never 1.0)"; the shortcut contradicted it.
 
 ### Shipped rule
 
-1. **Documents are chunked.** `stages._split_document` packs document text into
-   <=600-character sentence chunks (`DOC_SPAN_MAX_CHARS`), keeping the PDF page
-   marker as the locator for every chunk. Without this the locality test below
-   would reject every genuine article quote, because an article body arrives as
-   one flat block.
-2. **Containment is capped by the size of the chunk carrying it.**
-   `evidence._containment_is_local`: a chunk may support a value verbatim only
-   up to `20 * len(value) + 120` normalized characters (`CONTAINMENT_SPAN_CHARS_*`).
-   Beyond that, doors A and B contribute nothing and door C returns 0.75 instead
-   of 1.0 — a fact inside an oversized chunk never disappears for want of a
-   quote, it just stops claiming certainty.
-3. `_sim`'s shortcut now requires the probe to reach `MIN_QUOTE_CHARS`, so one
-   word can no longer manufacture a perfect match anywhere.
+One predicate, `evidence._containment_is_local`: a document span may carry a
+verbatim match when it is within `20 * len(match) + 120` normalized characters of
+it (`CONTAINMENT_SPAN_CHARS_PER_MATCHED` / `_SLACK`). Beyond that, doors A and B
+contribute nothing and door C returns 0.75 instead of 1.0 — so a genuine quote is
+never discarded for size reasons, it just stops claiming certainty.
+`MIN_STRONG_QUOTE_CHARS = 60` escapes the cap entirely: a verbatim run of ~10
+words cannot be coincidence, and the longest accidental match in the live library
+was 25 characters. `_sim`'s shortcut also gained the `MIN_QUOTE_CHARS` floor it
+always should have had, so one word can no longer manufacture a perfect match in
+any span kind.
+
+A document-chunking alternative was built, measured and **reverted**: splitting
+pages into ~600-char spans stranded two real paper-01 facts whose 200-character
+quotes crossed a boundary (4 kept -> 2 under both matchers). The budget alone gets
+the same false-accept reduction without that cost.
 
 ### Cost, measured
 
-`scripts/replay_matcher_rules.py` extracts all 19 golden rows once and scores the
-identical facts under the pre-change matcher (imported from `HEAD`, not retyped)
-and the shipped one: **66 facts kept both ways, 0 flips.** The local model
-quotes properly on the golden set, so none of its facts travelled these doors -
-they were the cloud's route. The three live document facts above are the ones
-the rule actually removes.
+`scripts/replay_matcher_rules.py` extracts all 19 golden rows once, caches the
+extractions, and scores the identical facts under the pre-change matcher (loaded
+from `git show <rev>:app/knowledge/evidence.py`, not retyped) and the current one:
+**66 facts kept before, 66 after, 0 flips.** The local model quotes properly, so
+none of its golden facts travelled these doors — they were the cloud's route.
 
 ### Two protocol findings
 
 1. **Do not compare two `tests/test_ai_eval.py` runs to judge a matcher change.**
-   Before/after full runs gave kept 65 -> 72 and `unsupported_kept_rate`
+   Before/after full runs reported kept 65 -> 72 and `unsupported_kept_rate`
    0.062 -> 0.111 while raw per-item fact counts also differed (edu-05 produced
-   11 facts in one run and 4 in the next) with temperature pinned at 0.
-   llama-server is not run-to-run reproducible at fact level, so single-run eval
-   deltas are noise at this scale; use the replay harness.
-2. **trafilatura 2.2.0 returns flat text.** `extract()` produced zero newlines
-   for a multi-paragraph page, so an article became one 66,000-character span
-   and the old paragraph chunking never fired. Chunking now happens in
-   `build_spans`, which also gives article evidence a position within the body.
+   11 facts in one run, 4 in the next) at temperature 0. llama-server is not
+   run-to-run reproducible at fact level, so single-run eval deltas are noise at
+   this scale; use the replay harness.
+2. **trafilatura 2.2.0 returns flat text.** `extract()` produced zero newlines for
+   a multi-paragraph page, so an article body arrives as one span with no
+   paragraph granularity and no position locator. The evidence rule no longer
+   depends on chunking, so this stays an open ingestion-quality item rather than a
+   blocker.
 
 ### Gate
 
-`tests/test_evidence_document_locality.py` (14 tests) pins: page chunking with
-page locators kept, a one-word value inside a page rejected, containment in an
-oversized chunk capped at 0.75, the same phrase in a local chunk still worth
-1.0, a short document span still worth 0.75, transcript rescue unchanged,
-caption and OCR behavior deliberately unchanged, both constant boundaries, and
-that no document was silently truncated by the chunker.
-Suite: 338 passed, 2 skipped.
+`tests/test_evidence_document_locality.py` (12 tests) pins: a page is one span
+and stays page-located; a short value inside a page is not evidence; a two-word
+phrase inside a page is capped at 0.75 with its page locator intact; the same
+phrase in a local span is still 1.0; a ten-word quote is unaffected by page size;
+a mid-length phrase is capped; short document spans still earn 0.75; transcript
+rescue and OCR/caption behavior unchanged; a value below the rescue floor still
+needs a real quote; and both constant boundaries.
+Suite: 336 passed, 2 skipped.
 
-What the golden set cannot check: its longest document row (`paper-01`) is a
-1,200-character abstract, which chunks into local spans, so the replay above
-shows 0 flips rather than exercising the rule. A golden row built from a real
-multi-page PDF is the missing coverage; the live library already has two
-candidates (reel 27, a 66k article; reel 28, a 15-page PDF).
+Not covered by the golden set: its largest document row (`paper-01`) is a
+1,828-character abstract, so the replay proves no regression rather than exercising
+the rule. The live library is the test, and a multi-page-PDF golden row remains
+the missing coverage (reel 28's 15-page PDF is a ready candidate).

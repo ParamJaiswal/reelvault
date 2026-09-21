@@ -1286,3 +1286,53 @@ Next:
 - Add a long-document golden row (from the 15-page PDF already in the library),
   then re-extract the three document reels and confirm the boilerplate facts
   are gone.
+
+---
+
+Date: 2026-09-21 (evidence containment audit)
+Phase: Evidence Ledger hardening on `v2-hybrid-routing`
+Done:
+- Audited the A/B follow-up ("short-value rescue on document spans") on the live
+  library. Three doors admitted facts on containment alone, not one: the rescue
+  path, `find_evidence`'s `value in span -> 0.75` boost, and `_sim`'s
+  `probe in span -> 1.0` shortcut. The shortcut is why
+  difficulty='Research' looked like *strong* evidence rather than weak, and the
+  module docstring's own promise ("0.75, never 1.0") was already being broken.
+- Shipped one predicate: a document span carries a verbatim match only within
+  `20 * len(match) + 120` normalized chars; beyond that the short-value doors add
+  nothing and the shortcut returns 0.75. `MIN_STRONG_QUOTE_CHARS = 60` keeps long
+  verbatim quotes strong at any span size (the worst accidental match measured in
+  vivo was 25 chars), and `_sim`'s shortcut finally has the `MIN_QUOTE_CHARS`
+  floor. Scoped to document spans by measurement, not assumption.
+- Reverted again the same way mistakes should be: a first attempt chunked PDF
+  pages and article bodies into ~600-char spans. It was built, committed, then
+  measured against the golden set and dropped two real paper-01 facts whose
+  200-char quotes straddled a boundary (4 kept -> 2 under BOTH matchers). The
+  budget alone achieves the same false-accept removal without that cost.
+- Instruments kept: `scripts/audit_rescue.py` (foreign-value containment rates by
+  span source, read-only on the live DB) and
+  `scripts/replay_matcher_rules.py` (one extraction set scored under
+  `git show <rev>:app/knowledge/evidence.py` and under the working tree).
+Verification:
+- 336 tests pass, 2 skipped (12 new in `tests/test_evidence_document_locality.py`).
+- `scripts/audit_rescue.py`: foreign document hits 8 -> 0 admitted; own document
+  hits 4 -> 1; ocr/caption/transcript rows unchanged.
+- `scripts/replay_matcher_rules.py --against 1df9cc4^`: 66 facts kept before, 66
+  after, 0 flips.
+- Live replay of the three suspect facts against their stored sources:
+  `Research` 0.0, `Difficult` 0.0, `Transformer model` 0.75 (was 1.0), and the
+  legitimate `Attention Is All You Need` still 1.0.
+- Two full eval runs were compared first and rejected as evidence: raw fact
+  counts differ at temperature 0 (edu-05: 11 facts then 4). Recorded in
+  docs/EVAL.md as a protocol finding.
+Blockers:
+- Stored rows are unchanged: the rule affects extraction, so the three weak
+  document facts are still in the library until those reels are re-extracted.
+  Re-running `classify_extract` rewrites the owner's facts, so it was left to them.
+- The golden set cannot exercise the rule (largest document row is a 1,828-char
+  abstract); a multi-page-PDF golden row is the missing coverage.
+- Accepted residual gap: OCR spans are capped at 2000 chars, so an OCR line can be
+  as unlocal as a page. Capping them removed real support, so it stays document-only.
+Next:
+- Add a golden row from reel 28's 15-page PDF, then re-extract reels 26/27/28 and
+  confirm the boilerplate facts are gone.

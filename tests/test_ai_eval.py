@@ -4,15 +4,17 @@ Run explicitly (needs llama-server up on RV_LLM_SERVER_URL):
     pytest tests/test_ai_eval.py -q -s
 Add RV_EVAL_WITH_SLM=1 to also exercise the business-SLM path in the router.
 
-Golden set: tests/golden/*.json — 12 hand-labeled reel-like items spanning
+Golden set: tests/golden/*.json — 19 hand-labeled items (12 video-like rows
+ plus the v2 text rows paper/x_post/article) covering
 job/scholarship/education/tool/recipe/fitness/Hinglish/finance/event content,
 each with transcript segments (+t), OCR lines, caption, expected categories,
 expected schema, key fields (needle substrings), deadlines (date_text), and a
 minimum number of evidence-kept facts.
 
-The harness mirrors app/pipeline/stages.py::stage_classify_extract exactly:
-same unified text format, same SourceSpan building, same Evidence Ledger call,
-same confidence semantics. Measured: category accuracy/macro-F1, schema
+The harness reproduces app/pipeline/stages.py::stage_classify_extract: same
+unified text format, and spans built by the pipeline's own build_spans (not a
+copy, so document chunking cannot drift out of the evaluation), same Evidence
+Ledger call, same confidence semantics. Measured: category accuracy/macro-F1, schema
 agreement, field recall, content presence, evidence kept/dropped/unsupported
 rates, deadline parse recall, malformed-JSON rate, latency.
 
@@ -52,30 +54,27 @@ def _norm(s) -> str:
 
 
 def _unified_and_spans(g: dict):
-    """Reproduce stage_classify_extract's unified text + Evidence spans."""
-    from app.knowledge.evidence import SourceSpan
+    """Reproduce stage_classify_extract's unified text + Evidence spans.
+
+    The spans come from the pipeline's own build_spans, so document chunking
+    and page markers cannot drift out of the harness."""
+    from app.pipeline.stages import build_spans
 
     caption = g.get("caption") or ""
     transcript = "\n".join(f"[{_fmt_ts(s['t'])}] {s['text']}"
                            for s in g.get("transcript", []))
     overlay = "\n".join(f"[{_fmt_ts(o['t'])}] OCR: {o['text']}"
                         for o in g.get("ocr", []))
-    doc_body = g.get("document") or ""
+    doc_body = (g.get("document") or "")[:10000]
     unified = (f"CAPTION: {caption}\n\nTRANSCRIPT:\n{transcript or '(no speech detected)'}"
                f"\n\nON-SCREEN TEXT:\n{overlay or '(none)'}")
     if doc_body:
-        unified += f"\n\nDOCUMENT:\n{doc_body[:10000]}"
+        unified += f"\n\nDOCUMENT:\n{doc_body}"
 
-    spans = [SourceSpan(text=s["text"], t_s=s["t"], source="transcript")
-             for s in g.get("transcript", [])]
-    spans += [SourceSpan(text=o["text"], t_s=o["t"], source="ocr")
-              for o in g.get("ocr", [])]
-    if caption:
-        spans.append(SourceSpan(text=caption, t_s=None, source="caption"))
-    if doc_body:
-        # Mirror build_spans: paragraph chunks, source='document'.
-        spans += [SourceSpan(text=p.strip(), t_s=None, source="document")
-                  for p in doc_body.split("\n\n") if p.strip()]
+    spans = build_spans(
+        [{"text": s["text"], "start_s": s["t"]} for s in g.get("transcript", [])],
+        [{"text": o["text"], "t_s": o["t"]} for o in g.get("ocr", [])],
+        caption, doc_body)
     return unified, spans
 
 

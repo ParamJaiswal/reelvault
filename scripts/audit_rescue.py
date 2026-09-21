@@ -58,8 +58,10 @@ def _load() -> tuple[dict[int, list[tuple[str, str]]], dict[int, str],
                 "SELECT text, t_s FROM ocr_results WHERE reel_id=?", (r["id"],))]
             doc = db.execute("SELECT body_text FROM documents WHERE reel_id=?",
                              (r["id"],)).fetchone()
+            # Same truncation the pipeline applies, or the audit would measure
+            # spans production never builds.
             built = build_spans(segs, ocrs, r["caption"] or "",
-                                doc["body_text"] if doc else "")
+                                (doc["body_text"] if doc else "")[:10_000])
             spans[r["id"]] = [(s.source, norm(s.text)) for s in built]
         facts = [(row[0], norm(row[1])) for row in db.execute(
             "SELECT reel_id, value FROM facts WHERE field NOT IN (%s)"

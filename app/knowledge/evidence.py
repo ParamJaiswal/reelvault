@@ -119,11 +119,22 @@ MIN_VALUE_CHARS = 6   # short-value rescue floor: "Zylker" qualifies, "AI" does 
 # chunked, so they contain almost any short phrase by accident: the live library
 # carried difficulty='Research' and topic='Transformer model' on the arXiv
 # license-boilerplate page, and because the probe cleared MIN_QUOTE_CHARS `_sim`
-# scored that a perfect match. Calibrated on the live library — the same test on
-# transcript/OCR/caption spans removes genuine facts, so the budget is applied
-# to document chunks only. See scripts/audit_rescue.py, docs/EVAL.md.
+# scored that a perfect match. Calibrated on the live library — see
+# scripts/audit_rescue.py and docs/EVAL.md.
+#
+# Scoped to document chunks by measurement, not by assumption: the same budget
+# applied to every span kind removed 11 of 17 genuine caption hits and 2 of 22
+# OCR hits in the live library for no extra gain. The difference is kind, not
+# length — a caption is the author's own sentence about this content, while a PDF
+# page is 15 pages that contain any word. An OCR line (capped at 2000 chars) is
+# the borderline case and is the known residual hole.
 CONTAINMENT_SPAN_CHARS_PER_MATCHED = 20
 CONTAINMENT_SPAN_CHARS_SLACK = 120
+# ...unless the match is long enough to be a quote rather than a coincidence: a
+# verbatim run of ~10 words cannot appear by accident, so it stays strong in a
+# span of any size. The longest accidental match found in the live library was
+# 25 characters (scripts/audit_rescue.py), which leaves a wide margin.
+MIN_STRONG_QUOTE_CHARS = 60
 
 
 def _containment_is_local(matched: str, span_norm: str) -> bool:
@@ -153,17 +164,18 @@ def _ratio(a: str, b: str) -> float:
 
 
 def _sim(a: str, b: str, containment_must_be_local: bool = False) -> float:
-    """How present a claimed QUOTE is in a span. For document chunks
-    (`containment_must_be_local`), verbatim presence is proof only when the
-    chunk is about the size of the quote; a larger chunk makes the same
-    presence the designed weak support (0.75). Transcript, OCR and caption
-    spans keep their tuned behavior."""
+    """How present a claimed QUOTE is in a span. For document spans
+    (`containment_must_be_local`), verbatim presence proves the claim only when
+    the span is about the size of the quote or the quote is long enough to be no
+    coincidence; otherwise it is the designed weak support (0.75). Transcript,
+    OCR and caption spans keep their tuned behavior."""
     if not a or not b:
         return 0.0
     if len(a) >= MIN_QUOTE_CHARS and a in b:
-        if containment_must_be_local and not _containment_is_local(a, b):
-            return 0.75
-        return 1.0
+        if (not containment_must_be_local or len(a) >= MIN_STRONG_QUOTE_CHARS
+                or _containment_is_local(a, b)):
+            return 1.0
+        return 0.75
     return _ratio(a, b)
 
 
