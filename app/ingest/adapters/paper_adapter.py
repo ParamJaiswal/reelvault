@@ -31,15 +31,29 @@ MAX_PDF_BYTES = 25 * 1024 * 1024
 MAX_PDF_PAGES = 40
 
 
+def pdf_text_from_bytes(data: bytes) -> str:
+    """Page-marked text ("p.N ...") from PDF bytes; '' on any failure."""
+    try:
+        import io
+
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        parts = []
+        for i, page in enumerate(reader.pages[:MAX_PDF_PAGES], start=1):
+            text = (page.extract_text() or "").strip()
+            if text:
+                parts.append(f"p.{i} {text}")
+        return "\n\n".join(parts)
+    except Exception:  # noqa: BLE001 — PDF is best-effort enrichment
+        return ""
+
+
 def _pdf_body(pdf_url: str) -> str:
     """Extract page-attributed text from an open-access PDF. Returns '' on
     any failure — the abstract-only body is a valid fallback."""
     if not pdf_url:
         return ""
     try:
-        import io
-
-        import pypdf
         with httpx.stream("GET", pdf_url, timeout=60,
                           follow_redirects=True) as r:
             r.raise_for_status()
@@ -48,14 +62,8 @@ def _pdf_body(pdf_url: str) -> str:
                 data += chunk
                 if len(data) > MAX_PDF_BYTES:
                     return ""
-        reader = pypdf.PdfReader(io.BytesIO(bytes(data)))
-        parts = []
-        for i, page in enumerate(reader.pages[:MAX_PDF_PAGES], start=1):
-            text = (page.extract_text() or "").strip()
-            if text:
-                parts.append(f"p.{i} {text}")
-        return "\n\n".join(parts)
-    except Exception:  # noqa: BLE001 — PDF is best-effort enrichment
+        return pdf_text_from_bytes(bytes(data))
+    except Exception:  # noqa: BLE001
         return ""
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import threading
 import time
@@ -162,9 +163,15 @@ def create_reel_from_request(uid: int, req: IngestRequest) -> dict:
     # Only video reels run the ingest download stage: a failed download there
     # triggers the metadata-only terminal path, which would clobber the stored
     # document body of text sources. Text media URLs stay in meta for later.
+    # Shared PDF/image FILES need the ingest stage (it extracts/registers
+    # them locally — no download involved).
     from app.db.queue import stages_for_kind
     plan = stages_for_kind(content_kind)
-    if resolved.get("needs_download") and content_kind == "video":
+    shared_file = (content_kind in ("paper", "image_post")
+                   and resolved.get("media_path"))
+    if shared_file:
+        queue.enqueue(reel_id, ["ingest"] + plan)
+    elif resolved.get("needs_download") and content_kind == "video":
         queue.enqueue(reel_id, ["ingest"] + plan)
     else:
         queue.enqueue(reel_id, plan)
@@ -911,7 +918,8 @@ async def ingest_upload(request: Request):
     up = form.get("file")
     if up is None or not getattr(up, "filename", ""):
         raise HTTPException(422, "multipart field 'file' is required")
-    dest = settings.media_dir / "video" / f"mob_{me['user_id']}_{int(time.time())}_{Path(up.filename).name}"
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(up.filename).name)[-80:]
+    dest = settings.media_dir / "video" / f"mob_{me['user_id']}_{int(time.time())}_{safe_name}"
     dest.parent.mkdir(parents=True, exist_ok=True)
     with dest.open("wb") as fh:
         shutil.copyfileobj(up.file, fh)

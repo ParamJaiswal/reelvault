@@ -1113,3 +1113,36 @@ Blockers:
 Next:
 - Use it: 20-item personal validation incl. text sources (v0 retrospective
   criteria), then decide cloud A/B from observed pain.
+
+---
+
+Date: 2026-09-21 (android pass)
+Phase: v2 Android unfreeze
+Done:
+- Portable build env installed without admin: D:\tools\jdk17 (Adoptium),
+  D:\tools\gradle-8.7, D:\android-sdk (platform-tools, platforms;android-34,
+  build-tools;34.0.0).
+- android/ was GITIGNORED and never compiled — now tracked with real
+  first-build fixes: Kotlin 2.0 Compose Gradle plugin, gradle.properties
+  (AndroidX), adaptive launcher icon, sdk.dir escaping, Card named-arg,
+  missing JSONObject import, KDoc `video/*` nested-comment syntax error.
+- app-debug.apk BUILDS: 7.6 MB at
+  android/app/build/outputs/apk/debug/app-debug.apk. Gradle wrapper
+  committed; README has verified build steps.
+- Share intake extended: application/pdf + image/* SEND filters; activity
+  accepts any stream; multipart upload sends real filename+MIME; server
+  sanitizes filename; DocumentFileAdapter routes .pdf→paper, images→
+  image_post; stage_ingest extracts PDF body (page markers) or registers
+  image as a frame for existing OCR; UI renders shared images.
+Verification:
+- 303 tests pass (incl. 11 new file-ingest/PDF tests).
+- Live: /ingest/upload real PDF → completed, 39590 chars, 15 pages,
+  evidence_page=1 facts, email anchors correctly 'document'.
+- Live: /ingest/upload PNG with text → frames→OCR→completed, exact text
+  'INVOICE 4500 DUE 15 SEPTEMBER' extracted.
+Blockers:
+- APK never run on a physical phone (no device here) — install + share-sheet
+  smoke test is the owner's step: adb install -r ...app-debug.apk.
+- Scanned (image-only) PDFs get no text (no OCR on PDF pages yet).
+Next:
+- Owner installs APK on phone; shares one PDF + one image; check notes appear.

@@ -139,6 +139,36 @@ class ShareTargetAdapter(IngestionAdapter):
         }
 
 
+DOC_EXTS = (".pdf",)
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+class DocumentFileAdapter(IngestionAdapter):
+    """Shared/uploaded PDF or image file (Android share sheet, drag-drop).
+
+    PDFs get body-extracted in the ingest stage (pypdf); images are added
+    as a single frame so the existing OCR stage reads them."""
+
+    name = "document_file"
+
+    def matches(self, req: IngestRequest) -> bool:
+        return req.kind in ("file", "share_target", "watch_folder") and bool(
+            req.local_path) and req.local_path.lower().endswith(
+                DOC_EXTS + IMAGE_EXTS)
+
+    def resolve(self, req: IngestRequest) -> dict[str, Any]:
+        p = req.local_path or ""
+        is_pdf = p.lower().endswith(DOC_EXTS)
+        return {
+            "source_url": req.url,
+            "caption": req.caption,
+            "author_handle": req.author_hint,
+            "media_path": p,
+            "needs_download": False,
+            "content_kind": "paper" if is_pdf else "image_post",
+        }
+
+
 class InstagramOfficialAdapter(IngestionAdapter):
     """Placeholder for Meta's official Graph API. NOT ACTIVE: the API does
     not expose saved collections (verified Aug 2026). If Meta adds it, wire
@@ -193,6 +223,8 @@ def _ensure_v2_adapters() -> None:
         ADAPTERS.insert(0, LinkedInAdapter())
     except ImportError:
         pass
+    if not any(a.name == "document_file" for a in ADAPTERS):
+        ADAPTERS.insert(0, DocumentFileAdapter())
 
 
 def route(req: IngestRequest) -> tuple[IngestionAdapter, dict[str, Any]]:

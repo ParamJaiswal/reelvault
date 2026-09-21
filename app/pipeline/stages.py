@@ -68,10 +68,56 @@ def get_reel(db, reel_id: int) -> dict:
 
 
 # ------------------------------------------------------------------ stages
+def _ingest_shared_document(reel_id: int, kind: str) -> None:
+    """Android share-sheet / drag-drop PDF or image. PDF: extract page text
+    into documents (same p.N markers build_spans parses for evidence_page).
+    Image: register as a single frame so the existing OCR stage reads it."""
+    from app.ingest.adapters.paper_adapter import pdf_text_from_bytes
+
+    with get_db() as db:
+        reel = get_reel(db, reel_id)
+        mp = resolve_media_path(reel["media_path"], "video")
+    if mp is None:
+        raise PermanentMediaError("shared document file missing on disk")
+
+    if kind == "image_post":
+        dest_dir = settings.media_dir / "frames" / str(reel_id)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / mp.name
+        if mp != dest:
+            shutil.copy2(mp, dest)
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO frames(reel_id, t_s, path) VALUES (?,?,?)",
+                (reel_id, 0.0, str(dest)))
+            set_reel(db, reel_id, thumb_path=str(dest),
+                     title=reel["title"] or mp.stem[:120])
+            ev(db, reel_id, "ingest", f"shared image registered for OCR: {mp.name}")
+        return
+
+    body = pdf_text_from_bytes(mp.read_bytes())
+    with get_db() as db:
+        if body:
+            db.execute(
+                "INSERT INTO documents(reel_id, body_text, source_url, mime_type)"
+                " VALUES(?,?,?,'application/pdf')",
+                (reel_id, body, reel["source_url"]))
+        set_reel(db, reel_id, title=reel["title"] or mp.stem[:120])
+        ev(db, reel_id, "ingest",
+           f"pdf text extracted: {len(body)} chars" if body
+           else "pdf had no extractable text (scanned?) — attach images or add OCR",
+           level="info" if body else "warn")
+
+
 def stage_ingest(reel_id: int, payload: dict) -> None:
     with get_db() as db:
         reel = get_reel(db, reel_id)
         set_reel(db, reel_id, status="processing", current_stage="ingest", progress=0.05)
+
+    kind = reel.get("content_kind", "video")
+    if kind in ("paper", "image_post") and reel["media_path"]:
+        _ingest_shared_document(reel_id, kind)
+        return
 
     reel_path = resolve_media_path(reel["media_path"], "video")
     if reel_path is not None:

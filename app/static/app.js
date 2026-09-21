@@ -382,7 +382,9 @@ function detailHTML(r) {
     `<span class="chip">${esc(e.kind)}: ${esc(e.name)}</span>`).join("");
   const sourceUrl = r.source_url
     ? `<a href="${esc(r.source_url)}" target="_blank" rel="noopener noreferrer">Open original ↗</a>` : "";
-  const media = r.media_path ? `<video controls preload="none" style="width:100%;border-radius:12px" src="/media/video/${r.id}"></video>` : "";
+  const media = r.content_kind === "image_post" && r.thumb_path
+    ? `<img src="/media/thumb/${r.id}" alt="" style="width:100%;border-radius:12px;max-height:70vh;object-fit:contain">`
+    : r.media_path ? `<video controls preload="none" style="width:100%;border-radius:12px" src="/media/video/${r.id}"></video>` : "";
 
   const deadline = (r.deadline_iso || r.deadline_raw) ? `
     <div class="sec"><h4>⏰ Deadline ${r.deadline_raw ? `<span style="color:var(--muted);font-weight:400">“${esc(r.deadline_raw)}”</span>` : ""}

@@ -58,6 +58,7 @@ STAGE_PLANS: dict[str, list[str]] = {
     "paper": ["ocr", "classify_extract", "embed", "finalize"],
     "note": ["classify_extract", "embed", "finalize"],
     "linkedin_post": ["ocr", "classify_extract", "embed", "finalize"],
+    "image_post": ["ocr", "classify_extract", "embed", "finalize"],
 }
 
 

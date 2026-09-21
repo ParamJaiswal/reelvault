@@ -74,6 +74,90 @@ def test_build_spans_page_attribution():
     assert all(s.source == "document" for s in spans)
 
 
+def test_shared_pdf_routes_to_document_adapter():
+    from app.ingest.adapters.base import route, IngestRequest
+    req = IngestRequest(user_id=1, kind="file", local_path="C:/tmp/paper.pdf")
+    adapter, resolved = route(req)
+    assert adapter.name == "document_file"
+    assert resolved["content_kind"] == "paper"
+
+
+def test_shared_image_routes_to_document_adapter():
+    from app.ingest.adapters.base import route, IngestRequest
+    req = IngestRequest(user_id=1, kind="file", local_path="C:/tmp/shot.PNG")
+    adapter, resolved = route(req)
+    assert resolved["content_kind"] == "image_post"
+
+
+def test_shared_video_still_video_adapter():
+    """Regression: mp4 shares must keep the v0.1 video route."""
+    from app.ingest.adapters.base import route, IngestRequest
+    req = IngestRequest(user_id=1, kind="file", local_path="C:/tmp/clip.mp4")
+    adapter, resolved = route(req)
+    assert adapter.name != "document_file"
+
+
+def test_stage_ingest_shared_pdf_extracts_body(tmp_db, sample_user, tmp_path):
+    import sqlite3
+    from app.db.schema import get_db
+    from app.pipeline import stages
+
+    pdf = tmp_path / "my paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    with get_db() as db:
+        rid = db.execute(
+            "INSERT INTO reels(user_id, source_kind, content_kind, media_path,"
+            " status, current_stage) VALUES(?,'file','paper',?,'processing','ingest')",
+            (sample_user, str(pdf))).lastrowid
+    with patch("app.ingest.adapters.paper_adapter.pdf_text_from_bytes",
+               return_value="p.1 first page content\n\np.2 second"):
+        stages.stage_ingest(rid, {})
+
+    db = sqlite3.connect(str(tmp_db))
+    doc = db.execute("SELECT body_text FROM documents WHERE reel_id=?",
+                     (rid,)).fetchone()
+    title = db.execute("SELECT title FROM reels WHERE id=?", (rid,)).fetchone()
+    db.close()
+    assert doc and "first page content" in doc[0]
+    assert title[0] == "my paper"
+
+
+def test_stage_ingest_shared_image_makes_frame(tmp_db, sample_user, tmp_path):
+    import sqlite3
+    from app.db.schema import get_db
+    from app.pipeline import stages
+
+    img = tmp_path / "shot.jpg"
+    img.write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
+    with get_db() as db:
+        rid = db.execute(
+            "INSERT INTO reels(user_id, source_kind, content_kind, media_path,"
+            " status, current_stage) VALUES(?,'file','image_post',?,'processing','ingest')",
+            (sample_user, str(img))).lastrowid
+    stages.stage_ingest(rid, {})
+
+    db = sqlite3.connect(str(tmp_db))
+    fr = db.execute("SELECT path, t_s FROM frames WHERE reel_id=?", (rid,)).fetchone()
+    thumb = db.execute("SELECT thumb_path FROM reels WHERE id=?", (rid,)).fetchone()
+    db.close()
+    assert fr and fr[0].endswith("shot.jpg") and fr[1] == 0.0
+    assert thumb[0] == fr[0]
+
+
+def test_stage_ingest_missing_file_fails_loudly(tmp_db, sample_user):
+    from app.db.schema import get_db
+    from app.pipeline import stages
+    from app.db.queue import PermanentJobError
+
+    with get_db() as db:
+        rid = db.execute(
+            "INSERT INTO reels(user_id, source_kind, content_kind, media_path,"
+            " status, current_stage) VALUES(?,'file','paper','C:/nope/gone.pdf',"
+            "'processing','ingest')", (sample_user,)).lastrowid
+    with pytest.raises(PermanentJobError):
+        stages.stage_ingest(rid, {})
+
+
 def test_paper_resolve_includes_pdf_text():
     from app.ingest.adapters.paper_adapter import PaperAdapter
     from app.ingest.adapters.base import IngestRequest
