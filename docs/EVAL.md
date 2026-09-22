@@ -1,6 +1,6 @@
 # AI Extraction Evaluation
 
-**Last run:** September 17, 2026 · **Branch:** `v0-core` · **Status: metric v2 baseline; Phase 7 incomplete**
+**Last run:** September 22, 2026 · **Branch:** `v2-hybrid-routing` · **Status: 20-row baseline; Phase 7 incomplete**
 
 Golden-set benchmark for classification, structured extraction, Evidence
 Ledger validation, and deadline parsing against the real Qwen/llama.cpp path
@@ -25,22 +25,29 @@ live model server and takes ~2 minutes.
 
 ## Golden set
 
-`tests/golden/*.json` — 16 items: 13 fictional reel-like fixtures plus three
-real-source-derived fixtures (`job-03`, `edu-04`, `edu-05`). The latter contain
-selected/edited excerpts and require provenance and label review; they are
-not complete raw recordings.
+`tests/golden/*.json` — 20 items: 13 fictional reel-like fixtures, three
+real-source-derived video fixtures (`job-03`, `edu-04`, `edu-05`), and four
+non-video kind rows (`paper-01`, `paper-02`, `article-01`, `xpost-01`) added for
+v2 ingestion. The real-source-derived ones contain selected/edited excerpts and
+require provenance and label review; they are not complete raw recordings.
 
 | Domain | Items | Notes |
 |---|---|---|
 | Job | job-01, job-02 | deadlines in speech + caption |
 | Scholarship | scholarship-01 | deadline in speech + OCR |
 | Education | edu-01, edu-02, edu-03 | concept / tutorial / deadline-dense |
+| Education (real) | edu-04, edu-05 | low-signal talking head; OCR-heavy how-to |
+| Job (real) | job-03 | single OCR sentence, no deadline |
 | Tool | tool-01, tool-02 | pricing hallucination bait |
 | Recipe (OCR-heavy) | recipe-01 | quantities on screen, taxonomy gap |
 | Fitness (music-heavy) | fitness-01 | fragmented speech, taxonomy gap |
 | Hinglish | hinglish-01 | mixed-language hard case |
 | Finance | finance-01 | numbers-heavy |
 | Event | event-01 | location + registration |
+| Paper | paper-01 | 1,828-char abstract: too small to exercise span locality |
+| Paper (multi-page) | paper-02 | real 2-page excerpt, page markers, 2,857-char span |
+| Article | article-01 | trafilatura body text |
+| X post | xpost-01 | embed-endpoint text |
 
 ### Label policy
 
@@ -883,3 +890,108 @@ Not covered by the golden set: its largest document row (`paper-01`) is a
 1,828-character abstract, so the replay proves no regression rather than exercising
 the rule. The live library is the test, and a multi-page-PDF golden row remains
 the missing coverage (reel 28's 15-page PDF is a ready candidate).
+
+**Superseded 2026-09-22:** that missing coverage now exists as `paper-02`. See
+the next section.
+
+## September 22, 2026 — 20-row baseline, and a pre-existing matcher defect
+
+llama-server restarted on :8091 (local `qwen2.5-3b-instruct`, `router_served_by_counts:
+{"llamacpp": 20}` — no cloud involved). `RV_EVAL_TRACE=1 pytest tests/test_ai_eval.py -q -s`
+→ **1 passed in 170.43 s**, 20 cases. Private trace:
+`D:/Temp/user/rv_test_22ogyute/eval_results.json` (not committed).
+
+| Metric v2 | 20-row run | Prior 19-row (Sep 20) |
+|---|---:|---:|
+| Schema agreement | 0.700 (14/20) | 0.688 (11/16) |
+| Kept-fact named-field recall | 0.760 (19/25) | 0.810 (17/21) |
+| Content presence (taxonomy-gap, n=3) | **0.000** | 0.667 |
+| Evidence-kept facts | 68 | 66 |
+| Unsupported-kept heuristic | **0.103** (7/68) | 0.036 |
+| Minimum-kept rate | 0.900 | 0.875 |
+| Deadline parse recall | 1.000 (4/4) | 1.000 |
+| Category multilabel / macro-F1 | 0.750 / 0.525 | 0.750 / 0.509 |
+| Malformed JSON | 0.000 | 0.000 |
+| Mean classify + extract latency | 8.47 s | 7.32 s |
+
+`paper-02` (2-page Attention excerpt, page markers, spans of 2,857 and 1,133 chars)
+agreed on schema, kept 2 facts, dropped 2, `min_facts_kept: 1` met. Its kept fields
+were `advantages` and `application` — **not in `EducationFacts`** — so it reports
+`invalid_fields: [advantages, application, company, model]`, the same model
+field-name violation already logged for edu-03/edu-05.
+
+### The two out-of-band numbers are not regressions
+
+**Content presence 0.0.** Traced to model emission, not matching: fitness-01 and
+recipe-01 each kept exactly one fact and both emitted the literal value
+`"20 minutes"` (both transcripts contain "twenty minutes") instead of the needles
+`burpee` / `paneer`; hinglish-01 kept 0. The denominator is 3 items, so a single
+item flipping moves the metric by 0.333. The replay below shows the matcher is
+flip-free on these rows, which rules out the evidence rule as the cause. Per the
+protocol finding above (llama-server is not run-to-run reproducible at fact level),
+this is recorded as variance on a structurally fragile metric, **not** as a
+regression — and not as evidence that the taxonomy-gap probes were wrong either.
+
+**Unsupported-kept 0.103.** 4 of the 7 unsupported kept facts are on the two paper
+rows. Both paper rows also score `topic: false` against their needles, so the
+document rows are jointly weak in a way the video rows are not.
+
+### `retry`/replay re-verified at 20 rows
+
+`scripts/replay_matcher_rules.py --against 0a29d04^` extracts all 20 rows once and
+scores identical facts under the pre-containment matcher and the current one:
+**68 kept before, 68 after, 0 flips**, widest span 2,810 chars. The earlier
+"66 → 66, 0 flips" claim was measured on 19 rows; it holds at 20, and now actually
+crosses a multi-page document span.
+
+### Pre-existing defect found: the Jaccard prefilter cannot see inside long documents
+
+`paper-02` dropped `model="Transformer"` whose quote is
+`"proposed a new simple network architecture, the Transformer, based solely on
+attention mechanisms"` — the document says "We **propose** a new simple network
+architecture, the Transformer, based solely on attention mechanisms". Near-verbatim,
+one word inflected. It scored `sim 0.0`.
+
+This is **not** caused by the containment rule. Replaying the identical quote
+against the matcher loaded from `0a29d04^` gives `sim=0.000, kept=False` — byte-identical
+verdict. The cause is in `_ratio`'s prefilter: `_jaccard(quote, span)` is measured
+against a 2,857-char page span, and Jaccard is `|A∩B| / |A∪B|`. Measured on this
+exact pair: the quote has **13** unique normalized terms, page 1 has **244**, and the
+intersection is **13** — every single quote term is present in the span. Jaccard is
+therefore 0.0533, and because the union is dominated by the span it **cannot exceed
+0.0533 even for a perfect match**, against `JACCARD_MIN = 0.20`. Exact containment
+would have caught the quote, but the model inflected one word, so containment failed
+and the fallback similarity check was prefiltered away before it ever ran. The
+length-independent overlap coefficient `|A∩B| / |A|` on the same pair is 1.0000.
+
+Consequence, and it is the honest one: **any document quote that is near-verbatim
+but not exactly verbatim is silently dropped, regardless of how well it supports the
+claim.** The containment rule made large-span matches *weaker*; this makes them
+*impossible* once a single word differs. The two are different defects and only
+the first was addressed.
+
+**A prefilter tweak does not fix it — measured.** Bypassing `JACCARD_MIN` and calling
+`SequenceMatcher` directly on the same pair returns **0.006**, not a high score,
+because `ratio()` is `2M / T` where `T` is the total length of *both* strings, so a
+2,857-char span dominates the denominator exactly as it dominates the Jaccard union.
+Short foreign values score 0.000 the same way. In other words, for a large document
+span **neither** similarity measure can express "this quote occurs here" — only exact
+containment can, and one inflected word defeats it.
+
+Fix condition (NOT applied — trust-critical module, needs its own gated change): the
+match has to be scale-local, i.e. a best-matching-substring / local-alignment test
+(the `difflib` `get_matching_blocks` or a Smith–Waterman-style scan over the span)
+that asks "what is the closest run of this span to the quote" instead of comparing
+the whole span. Any such change must be re-measured with `scripts/audit_rescue.py`
+before and after, because loosening document matching is precisely the surface where
+`Research` and `Difficult` authenticated themselves off arXiv licence boilerplate;
+and per AGENTS.md §9 it needs an eval run on both sides. Until then this stays a
+documented ceiling on paper/article fact recall, alongside the accepted edu-05
+model-capability ceiling.
+
+### Also corrected this session
+
+`.gitignore` covered `.env` but not `.env.bak*`; a config backup containing a live
+cloud key sat untracked in the repo root. Rule added. `.env.example` verified still
+tracked (the pattern is deliberately narrower than `.env.*`).
+
