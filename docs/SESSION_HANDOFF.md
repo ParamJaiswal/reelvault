@@ -1367,3 +1367,27 @@ Blockers:
 Next:
 - Add multi-page-PDF golden row from reel 28 for document locality coverage.
 - Re-extract reels 26/27/28 to clear boilerplate facts (owner-authorized).
+
+Follow-up, same day — paper-02 golden row added (`b9d8648`), closing the first
+Next item above.
+
+## Do not relabel golden fixtures to raise schema agreement
+
+Schema agreement is 0.688 (11/16). Four of the five mismatches were "fixed" by
+editing labels and the change was reverted (`3cc95c8` -> `82a2536`). Two traps,
+both non-obvious:
+
+- `recipe-01`, `fitness-01`, `hinglish-01` expect `generic` **on purpose**. They
+  are the taxonomy-gap probes (docs/EVAL.md:39-40) and their `fields` use the
+  `{"*": [...]}` wildcard that drives the "Content presence (taxonomy-gap items)"
+  metric. Relabeling them to `education` makes the classifier look better only by
+  deleting the cases that measure what happens when no schema fits.
+- `scholarship-01` expects `job` because `JobFacts` is the only schema with a
+  `deadline` field (`app/knowledge/schemas.py:29-50`) and the harness extracts
+  against the **expected** schema (`tests/test_ai_eval.py:223`). Switching it to
+  `education` leaves the fixture structurally unable to express its Nov-30
+  deadline, silently breaking deadline parse recall.
+
+Real fix, if pursued: a schema that fits how-to content, or an owner decision
+that `generic` is the correct verdict for it. Not a label edit.
+
