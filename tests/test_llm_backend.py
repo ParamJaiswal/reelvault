@@ -137,3 +137,20 @@ def test_openai_compat_chat_records_telemetry(tmp_db):
     assert row[2] == "test-model"
     assert row[3] == 1
     assert row[4] == 10
+
+
+def test_cloud_backend_does_not_autostart_llama(tmp_db, monkeypatch):
+    """A cloud RV_LLM_SERVER_URL has no port to parse. auto_start_llama
+    defaults to True, so without the backend guard ensure_llama_server()
+    raised out of _server_base() and killed the llama-starter thread."""
+    from app.core import llama_manager as LM
+
+    monkeypatch.setattr(LM.settings, "llm_backend", "openai_compat")
+    monkeypatch.setattr(LM.settings, "llm_text_backend", "", raising=False)
+    monkeypatch.setattr(LM.settings, "auto_start_llama", True)
+    monkeypatch.setattr(LM.settings, "llm_server_url",
+                        "https://api.groq.com/openai/v1")
+    spawn = monkeypatch.setattr(LM.subprocess, "Popen",
+                                lambda *a, **k: pytest.fail(
+                                    "must not spawn llama-server for a cloud backend"))
+    LM.ensure_llama_server()          # must return quietly, not raise

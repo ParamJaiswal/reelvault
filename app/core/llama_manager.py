@@ -43,6 +43,11 @@ def ensure_llama_server(wait_s: int = 240) -> None:
     global _proc
     if not settings.auto_start_llama:
         return
+    if settings.llm_backend != "llamacpp":
+        # Nothing local to manage. `auto_start_llama` defaults to True, so
+        # without this a cloud RV_LLM_SERVER_URL (no port to parse) used to
+        # raise out of _server_base() and kill the llama-starter thread.
+        return
     host, port = _server_base()
     if _port_open(host, port):
         log.info("llama-server already running on %s:%s", host, port)
