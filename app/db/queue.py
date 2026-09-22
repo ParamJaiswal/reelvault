@@ -114,15 +114,21 @@ class Queue:
             # fail() deletes every still-queued stage downstream of a dead one,
             # so reviving only this stage leaves the reel with no embed/finalize
             # to run: it sits in 'processing' forever with all jobs 'done'.
-            # Re-create the missing tail of this kind's plan.
+            # Re-create the missing tail of the reel's chain. Video chains are
+            # headed by ingest; text kinds are enqueued without it (api/main.py),
+            # so ingest is listed first here only to revive a dead ingest itself
+            # and is never inserted for a stage that follows it.
+            # Caller contract: revive EVERY dead/failed stage of the reel
+            # (api/main.py loops them) — reviving one past another dead stage
+            # would queue work downstream of a blocker.
             kind = conn.execute("SELECT content_kind FROM reels WHERE id=?",
                                 (reel_id,)).fetchone()
-            plan = stages_for_kind((kind["content_kind"] if kind else None)
-                                   or "video")
-            if stage in plan:
+            chain = ["ingest"] + stages_for_kind(
+                (kind["content_kind"] if kind else None) or "video")
+            if stage in chain:
                 have = {r["stage"] for r in conn.execute(
                     "SELECT stage FROM jobs WHERE reel_id=?", (reel_id,))}
-                for later in plan[plan.index(stage) + 1:]:
+                for later in chain[chain.index(stage) + 1:]:
                     if later not in have:
                         conn.execute(
                             "INSERT INTO jobs(reel_id, stage, status, run_after,"

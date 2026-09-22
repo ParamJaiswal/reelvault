@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings, AUTH_TOKEN
 from app.core.logging_setup import setup_logging
-from app.db.queue import STAGES, Queue
+from app.db.queue import STAGES, Queue, stages_for_kind
 from app.db.schema import connect, get_db, migrate
 from app.ingest.adapters.base import (IngestRequest, parse_shortcode,
                                       route, normalize_instagram_url)
@@ -693,8 +693,8 @@ def admin_jobs(uid: int = Depends(require_auth)):
 @app.post("/api/admin/retry/{reel_id}")
 def retry_failed(reel_id: int, uid: int = Depends(require_auth)):
     with get_db() as db:
-        r = db.execute("SELECT current_stage, status FROM reels WHERE id=?",
-                       (reel_id,)).fetchone()
+        r = db.execute("SELECT current_stage, status, content_kind"
+                       " FROM reels WHERE id=?", (reel_id,)).fetchone()
         if not r:
             raise HTTPException(404, "not found")
     retried = []
@@ -726,12 +726,17 @@ def retry_failed(reel_id: int, uid: int = Depends(require_auth)):
             row = db.execute(
                 "SELECT media_path, source_url FROM reels WHERE id=?",
                 (reel_id,)).fetchone()
-        start = STAGES.index(r["current_stage"])
-        # a URL reel that never downloaded must rebuild from ingest,
-        # otherwise media fails again on missing disk artifacts
-        if start > 0 and not row["media_path"] and row["source_url"]:
+        kind = r["content_kind"] or "video"
+        chain = (["ingest"] if kind == "video" else []) + stages_for_kind(kind)
+        stage = r["current_stage"]
+        start = chain.index(stage) if stage in chain else 0
+        # A URL *video* that never downloaded must rebuild from ingest, else
+        # media fails again on missing disk artifacts. Text sources keep
+        # media_path NULL by design and have no ingest stage — forcing one
+        # would clobber their stored document body (see lines 163-177).
+        if start > 0 and kind == "video" and not row["media_path"] and row["source_url"]:
             start = 0
-        remaining = STAGES[start:]
+        remaining = chain[start:]
         queue.enqueue(reel_id, remaining)
         retried = remaining
     return {"retrying": retried}

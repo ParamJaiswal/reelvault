@@ -140,3 +140,33 @@ def test_retry_of_upload_reel_keeps_media_start(client, tmp_db, sample_user):
     res = client.post(f"/api/admin/retry/{rid}")
     assert res.status_code == 200, res.text
     assert res.json()["retrying"][0] == "embed", res.text
+
+
+def test_retry_of_text_source_never_rebuilds_through_ingest(
+        client, tmp_db, sample_user):
+    """A paper/article URL reel keeps media_path NULL by design. Forcing the
+    rebuild to start at ingest gave it a download stage whose metadata-only
+    failure path clobbers the stored document body — real data loss."""
+    from app.db.schema import get_db
+    with get_db() as db:
+        cur = db.execute(
+            "INSERT INTO reels(user_id, source_kind, source_url, shortcode,"
+            " status, current_stage, content_kind)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (sample_user, "url", "https://arxiv.org/abs/1706.03762",
+             "RtryPpr1", "failed", "classify_extract", "paper"))
+        rid = cur.lastrowid
+        db.execute("INSERT INTO documents(reel_id, body_text)"
+                   " VALUES (?, 'ATTENTION IS ALL YOU NEED BODY')", (rid,))
+    res = client.post(f"/api/admin/retry/{rid}")
+    assert res.status_code == 200, res.text
+    assert res.json()["retrying"] == ["classify_extract", "embed",
+                                      "finalize"], res.text
+    with get_db() as db:
+        stages = {r[0] for r in db.execute(
+            "SELECT stage FROM jobs WHERE reel_id=?", (rid,))}
+        body = db.execute("SELECT body_text FROM documents WHERE reel_id=?",
+                          (rid,)).fetchone()
+    assert "ingest" not in stages, f"ingest would clobber the body: {stages}"
+    assert "media" not in stages and "transcribe" not in stages, stages
+    assert body[0] == "ATTENTION IS ALL YOU NEED BODY"

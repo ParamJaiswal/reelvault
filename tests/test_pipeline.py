@@ -101,6 +101,56 @@ class TestQueue:
         assert n == 1, "re-retry must not insert a second embed job"
         q.close()
 
+    def test_retry_ingest_restores_whole_chain(self, tmp_db, monkeypatch):
+        """Reels are enqueued as ["ingest"] + kind plan, and ingest is not in
+        STAGE_PLANS — retrying a dead ingest must still restore every stage."""
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "retry_backoff_s", 0)
+        q = Queue()
+        rid = mk_reel(1)
+        q.enqueue(rid, ["ingest", "media", "transcribe", "ocr",
+                        "classify_extract", "embed", "finalize"])
+        first = q.claim("w")
+        assert first["stage"] == "ingest"
+        for _ in range(settings.max_retries + 1):
+            q.fail(first["id"], "download gone")
+        with get_db() as db:
+            left = {r[0] for r in db.execute(
+                "SELECT stage FROM jobs WHERE reel_id=?", (rid,))}
+        assert left == {"ingest"}, "dead ingest deletes the whole chain"
+        assert q.retry_stage(rid, "ingest") is True
+        with get_db() as db:
+            after = {r[0] for r in db.execute(
+                "SELECT stage FROM jobs WHERE reel_id=?", (rid,))}
+        assert after == {"ingest", "media", "transcribe", "ocr",
+                         "classify_extract", "embed", "finalize"}, \
+            f"retrying ingest must rebuild the chain, got {sorted(after)}"
+        q.close()
+
+    def test_retry_respects_kind_plan_not_video_stages(self, tmp_db, monkeypatch):
+        """A paper reel must not get media/transcribe back when its tail is
+        rebuilt — those stages are not in the paper plan."""
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "retry_backoff_s", 0)
+        q = Queue()
+        rid = mk_reel(1)
+        with get_db() as db:
+            db.execute("UPDATE reels SET content_kind='paper' WHERE id=?",
+                       (rid,))
+        q.enqueue(rid, ["ingest", "ocr", "classify_extract", "embed",
+                        "finalize"])
+        first = q.claim("w")
+        assert first["stage"] == "ingest"
+        for _ in range(settings.max_retries + 1):
+            q.fail(first["id"], "boom")
+        assert q.retry_stage(rid, "ingest") is True
+        with get_db() as db:
+            after = {r[0] for r in db.execute(
+                "SELECT stage FROM jobs WHERE reel_id=?", (rid,))}
+        assert after == {"ingest", "ocr", "classify_extract", "embed",
+                         "finalize"}, f"paper chain wrong, got {sorted(after)}"
+        q.close()
+
     def test_stale_running_job_reclaimed(self, tmp_db, monkeypatch):
         import time
 
