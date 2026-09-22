@@ -109,7 +109,27 @@ class Queue:
                 " WHERE reel_id=? AND stage=? AND status IN ('failed','dead')",
                 (now, now, reel_id, stage),
             )
-            return cur.rowcount > 0
+            if not cur.rowcount:
+                return False
+            # fail() deletes every still-queued stage downstream of a dead one,
+            # so reviving only this stage leaves the reel with no embed/finalize
+            # to run: it sits in 'processing' forever with all jobs 'done'.
+            # Re-create the missing tail of this kind's plan.
+            kind = conn.execute("SELECT content_kind FROM reels WHERE id=?",
+                                (reel_id,)).fetchone()
+            plan = stages_for_kind((kind["content_kind"] if kind else None)
+                                   or "video")
+            if stage in plan:
+                have = {r["stage"] for r in conn.execute(
+                    "SELECT stage FROM jobs WHERE reel_id=?", (reel_id,))}
+                for later in plan[plan.index(stage) + 1:]:
+                    if later not in have:
+                        conn.execute(
+                            "INSERT INTO jobs(reel_id, stage, status, run_after,"
+                            " created_at, updated_at)"
+                            " VALUES (?,?,'queued',?,?,?)",
+                            (reel_id, later, now, now, now))
+            return True
 
     # -- consumer API --------------------------------------------------
     def claim(self, worker_id: str) -> dict[str, Any] | None:

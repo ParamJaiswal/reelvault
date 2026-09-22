@@ -63,6 +63,44 @@ class TestQueue:
         assert q.claim("w") is not None
         q.close()
 
+    def test_retry_restores_downstream_stages_deleted_by_dead_stage(
+            self, tmp_db, monkeypatch):
+        """fail() deletes queued stages after a dead one; retry_stage must
+        re-create them or the reel never reaches finalize."""
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "retry_backoff_s", 0)
+        q = Queue()
+        rid = mk_reel(1)
+        q.enqueue(rid, ["ocr", "classify_extract", "embed", "finalize"])
+        # finish ocr, then dead-letter classify_extract, leaving embed and
+        # finalize still 'queued' (the state a real mid-pipeline death has)
+        first = q.claim("w")
+        assert first["stage"] == "ocr"
+        q.complete(first["id"])
+        target = q.claim("w")
+        assert target["stage"] == "classify_extract"
+        for _ in range(settings.max_retries + 1):
+            q.fail(target["id"], "groq 404")
+        with get_db() as db:
+            left = {r[0] for r in db.execute(
+                "SELECT stage FROM jobs WHERE reel_id=?", (rid,))}
+        assert "embed" not in left and "finalize" not in left, \
+            "downstream stages are deleted when a stage dies (by design)"
+        assert q.retry_stage(rid, "classify_extract") is True
+        with get_db() as db:
+            after = {r[0]: r[1] for r in db.execute(
+                "SELECT stage, status FROM jobs WHERE reel_id=?", (rid,))}
+        assert after.get("classify_extract") == "queued"
+        assert after.get("embed") == "queued", "embed must come back"
+        assert after.get("finalize") == "queued", "finalize must come back"
+        # a second retry must not duplicate the tail
+        q.retry_stage(rid, "classify_extract")
+        with get_db() as db:
+            n = db.execute("SELECT COUNT(*) FROM jobs WHERE reel_id=?"
+                           " AND stage='embed'", (rid,)).fetchone()[0]
+        assert n == 1, "re-retry must not insert a second embed job"
+        q.close()
+
     def test_stale_running_job_reclaimed(self, tmp_db, monkeypatch):
         import time
 
