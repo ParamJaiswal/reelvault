@@ -17,6 +17,7 @@ android/app/release/
 _archive/
 *.pyc
 .env
+.env.bak*
 backups/
 
 # agent worktrees
