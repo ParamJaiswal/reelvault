@@ -1407,12 +1407,25 @@ Two unrelated causes, both diagnosed against the running app:
    `RV_LLM_MODEL_NAME=qwen2.5-3b-instruct`. Backup: `.env.bak-20260922-085924`.
    **If cloud is wanted again, the model name must be re-checked against
    `GET /v1/models` — Groq retires models and a retired name is a hard 404.**
-2. **`retry_stage` left reels wedged forever** (`03c0f88`). `fail()` deletes
-   every still-queued downstream stage when a stage dead-letters, but the admin
-   retry revived only the dead row. Result: all jobs read `done`, no
-   `embed`/`finalize` exist, and the reel sits in `processing` permanently.
-   `retry_stage` now re-queues the missing tail of the reel's own kind plan,
-   idempotently. Regression test verified to fail without the fix.
+2. **`retry_stage` left reels wedged forever** (`03c0f88`, extended `06be8bd`).
+   `fail()` deletes every still-queued stage downstream of one it dead-letters,
+   but the admin retry revived only the dead row. Result: all jobs read `done`,
+   no `embed`/`finalize` exist, and the reel sits in `processing` permanently.
+   `retry_stage` now re-queues the missing tail of the reel's chain,
+   idempotently. Two further holes in the same class were found on review:
+   - `ingest` is not in `STAGE_PLANS`, so retrying a dead `ingest` restored
+     nothing. The chain is now `["ingest"] + plan`.
+   - `/api/admin/retry`'s rebuild fallback used hardcoded `STAGES`, so a **text
+     source** (paper/article/x_post/note) that failed with `media_path` NULL —
+     normal for them — was forced back through `ingest` and additionally got
+     `media`+`transcribe`. Running `ingest` on a text source takes the
+     metadata-only terminal path and **clobbers its stored
+     `documents.body_text`** — the hazard the enqueue comment (main.py:163-177)
+     warns about. Now derived from `content_kind`; video is unchanged because
+     `["ingest"] + video plan` **is** `STAGES`.
+   Do not infer a reel's chain from its surviving `jobs` rows — `fail()` deletes
+   them. `content_kind` is the only durable signal, and it is set once at reel
+   insert and never updated.
 
 Also fixed (`add8bf6`): `auto_start_llama` defaults True, so with a cloud
 `RV_LLM_SERVER_URL` (no port to parse) `llama_manager._server_base()` raised
@@ -1429,8 +1442,23 @@ Verification:
   fact (`company='Claude'`, transcript, t_s=0.0).
 - FTS confirms the core promise: searches "DSA interview", "Claude", "hints"
   all return reel 32.
-- Suite: 347 passed, 3 skipped.
+- Suite: **350 passed, 3 skipped**. 5 new tests this session (3 retry-chain,
+  2 text-source/ingest), each verified to FAIL against the pre-fix code and pass
+  after — not vacuous.
+- cavecrew review of the queue diff: 0 critical; two advisory findings both
+  addressed (inaccurate comment corrected, caller invariant documented). It
+  independently surfaced the text-source ingest clobber before it was fixed.
+- `.env` is gitignored but a config **backup is not**: `.env.bak-*` sat in the
+  repo root holding the live Groq key, one `git add .` from being committed.
+  Moved to `D:/Temp/user/reelvault_env.bak-20260922-085924`. Consider adding
+  `.env.bak*` to `.gitignore` — not done, it is the owner's ignore file.
 - Reels 30/31 are emulator-test junk (30 = invalid stub MP4, `failed`;
   31 = fake URL, `completed`, no facts). Owner left them in place.
+- **Background processes started from the agent do not persist** — the app died
+  twice with no traceback when the tool call ended. For a durable session the
+  owner must run `Start-ReelVault.ps1` in their own terminal.
+- Unpushed: `v2-hybrid-routing` is ahead of its remote; nothing was pushed.
+- Git hygiene: `06be8bd`'s subject duplicates `03c0f88`'s; it is the refinement
+  of that fix, not a repeat. Left as-is rather than amended.
 
 
