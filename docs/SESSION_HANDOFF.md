@@ -1391,3 +1391,46 @@ both non-obvious:
 Real fix, if pursued: a schema that fits how-to content, or an owner decision
 that `generic` is the correct verdict for it. Not a label edit.
 
+## Running the app — two live defects found and fixed (2026-09-22)
+
+Owner reported "Failed to fetch" / offline badge when adding a new Reel URL.
+Two unrelated causes, both diagnosed against the running app:
+
+1. **Groq retired `llama-3.3-70b-versatile`.** The `.env` still named it, so
+   every `classify_extract` died with HTTP 404 `model_not_found` after 3
+   attempts. Confirmed live: `GET /v1/models` on the owner's key lists 13 models
+   and that name is not among them; `openai/gpt-oss-120b` and `-20b` do respond,
+   and gpt-oss returns usable JSON at the existing `llm_max_tokens=1400` (~1.3 s,
+   reasoning ~420 chars). Owner chose to leave the cloud and return to local
+   llama.cpp, so `.env` is now `RV_LLM_BACKEND=llamacpp`,
+   `RV_LLM_SERVER_URL=http://127.0.0.1:8091/v1`,
+   `RV_LLM_MODEL_NAME=qwen2.5-3b-instruct`. Backup: `.env.bak-20260922-085924`.
+   **If cloud is wanted again, the model name must be re-checked against
+   `GET /v1/models` — Groq retires models and a retired name is a hard 404.**
+2. **`retry_stage` left reels wedged forever** (`03c0f88`). `fail()` deletes
+   every still-queued downstream stage when a stage dead-letters, but the admin
+   retry revived only the dead row. Result: all jobs read `done`, no
+   `embed`/`finalize` exist, and the reel sits in `processing` permanently.
+   `retry_stage` now re-queues the missing tail of the reel's own kind plan,
+   idempotently. Regression test verified to fail without the fix.
+
+Also fixed (`add8bf6`): `auto_start_llama` defaults True, so with a cloud
+`RV_LLM_SERVER_URL` (no port to parse) `llama_manager._server_base()` raised
+`ValueError: invalid literal for int() with base 10: '//api.groq.com/openai'`
+and killed the llama-starter thread on **every** startup. Now gated on
+`llm_backend == "llamacpp"`.
+
+Verification:
+- Startup log clean; `rv.llama_mgr spawning llama-server` -> `is up (pid 24144)`;
+  `/readyz` = db/llm/embedder all true.
+- Reel 32 (`instagram.com/reel/DdhzEBOqxlp/`) un-wedged by enqueuing its missing
+  `embed`+`finalize`: now `completed/done`, summary "Claude helps with DSA
+  interview preparation…", cats Tutorial/Product, conf 0.9, 1 evidence-backed
+  fact (`company='Claude'`, transcript, t_s=0.0).
+- FTS confirms the core promise: searches "DSA interview", "Claude", "hints"
+  all return reel 32.
+- Suite: 347 passed, 3 skipped.
+- Reels 30/31 are emulator-test junk (30 = invalid stub MP4, `failed`;
+  31 = fake URL, `completed`, no facts). Owner left them in place.
+
+
