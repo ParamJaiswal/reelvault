@@ -1537,6 +1537,13 @@ Verification:
   miss `min_facts_kept` (`recipe-01` emitted 1 of 2, `edu-05` had all 7 raw facts
   dropped, `hinglish-01` had its 1 dropped); both paper rows clear their floor.
   Details in `docs/EVAL.md`, "September 23, 2026".
+- Second, trace-enabled run (`RV_EVAL_TRACE=1`) → **1 passed in 193.50 s**, kept 69,
+  used for the per-fact drop classification in `docs/EVAL.md`. Note for whoever runs
+  this next: **llama-server did not survive the gap between the two runs** — port
+  8091 was dead and had to be restarted (detached via `Start-Process`, ready in ~30 s)
+  before the eval would go through. With no server the run **fails, it does not
+  skip**: `assert llamacpp.available` at `tests/test_ai_eval.py:188`, in 2.8 s
+  (verified by pointing `RV_LLM_SERVER_URL` at a dead port).
 
 Durable lesson: **a loosened trust door needs an adversarial input pinned in the
 test, not just the positive case.** All four review rounds on this branch found the
@@ -1558,11 +1565,16 @@ quoted from an earlier run in this session's own working notes (61→64, a
 second 0.0→0.86 flip set) did not reproduce and were deleted rather than committed.
 
 Next:
-- Classify `edu-05`'s 7 dropped facts: correct rejections (model paraphrased) or
-  false rejects (the matcher still can't see them). Needs one `RV_EVAL_TRACE=1`
-  run on that row, which also names the content-presence hit.
+- Decided, not blocking: `edu-05`'s drops were classified offline from the trace —
+  of 32 dropped facts across the run, **3 are matcher false rejects** (all `edu-05`,
+  all quotes verbatim across consecutive transcript segments), 10 had no quote at
+  all, 9 were paraphrases, 10 were refused by the claim-term gate on purpose. The
+  matcher is no longer the main limiter of fact recall; model emission is.
+- If the cross-segment case is ever worth fixing: composite consecutive segments into
+  one span and require **exact containment** — no fuzzy measure. Measure how many
+  live-library facts it recovers first; on the golden set the number is 3.
 
-Blockers: none. Unpushed: `v2-hybrid-routing` is 21 commits ahead of its remote;
+Blockers: none. Unpushed: `v2-hybrid-routing` is 22 commits ahead of its remote;
 nothing was pushed this session. Owner-side items from the previous section still
 open: re-extract 26/27/28, delete junk reels 30/31, change the owner password and
 remove `data/.owner_credentials.txt`, rotate the Groq key that was pasted into chat.

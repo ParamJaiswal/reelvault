@@ -1147,3 +1147,42 @@ this time; the trace needed to name which one was not captured (`RV_EVAL_TRACE=1
 next run if attribution matters). Recorded as the same structurally fragile n=3
 metric, not as a gain: a single item moves it by 0.333 in either direction.
 
+## September 23, 2026 — trace run, and what actually limits fact recall
+
+`RV_EVAL_TRACE=1 pytest tests/test_ai_eval.py -q -s` → **1 passed in 193.50 s**, 20
+llamacpp. Private trace: `D:/Temp/user/rv_test_ho3dd82l/eval_results.json` (contains
+source text; not committed). Kept **69**, dropped 32, unsupported-kept 0.116 (8/69),
+`min_facts_kept` 0.900, deadlines 4/4, malformed JSON 0, 9.61 s/reel. Classification
+was **again** byte-identical to both earlier runs (0.75 / 0.85 / 0.525 / 0.39 / 0.70).
+
+Three runs today, same code: kept **65 / 65 / 69**, content presence **0.000 / 0.333 /
+0.000**, min-kept **0.900 / 0.850 / 0.900**. `edu-05` went 0 kept → 2 kept across runs
+that differ only in sampling. This is the protocol finding restated with a third
+sample: per-fact numbers on this box carry a ±4 band, so use
+`scripts/replay_matcher_rules.py` for any matcher question.
+
+**Why facts drop, measured rather than assumed.** The trace lists every dropped fact
+with its quote, so each of the 32 was classified offline against its own row's spans:
+
+| Cause | n | Whose fault |
+|---|---:|---|
+| Fact emitted with **no quote at all** | 10 | model emission — the ledger cannot rescue an uncited claim |
+| Quote verbatim inside one span, but the **claim-term prerequisite** rejected it (abstractive values like `'AI in Networking'`, `'Intermediate'`) | 10 | policy, deliberate: a label the source never uses is not evidence |
+| At least one quote line absent from every span, or lines stitched from non-adjacent spans | 9 | model emission — paraphrase or recombination |
+| **Every quote line verbatim, in consecutive transcript segments** | 3 (all `edu-05`) | **matcher — a real false reject** |
+
+So of 32 drops, 3 are the matcher's. `edu-05`'s two-field `topic`/`technologies` miss
+is that same row, which is why it looks so bad in a summary: its quotes cross whisper
+segment boundaries, and `find_evidence` scores one span at a time — a 120-character
+quote cannot fit a 107-character segment no matter how faithful it is. That is the
+document-span ceiling from the section above, reappearing on the transcript path.
+
+**Not fixed here, on purpose.** Making transcripts cross-segment is a second
+loosening of the Evidence Ledger, and the first one took four review rounds to make
+safe. A defensible shape: concatenate consecutive segments (same source, contiguous
+index) into a composite span, keep the timestamp of the first, and require the quote
+to be exactly contained in that composite — no fuzzy measure involved. Before writing
+it, the same offline classification above should say how many *live-library* facts it
+would recover, because the number on the golden set is 3 and the golden set's video
+rows are the ones that already pass.
+
