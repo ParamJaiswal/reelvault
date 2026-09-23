@@ -1678,8 +1678,10 @@ Next:
   is not worth a session; the useful residue is the finding that the matcher
   branch had no input to act on in the live library.
 
-Blockers: none. Unpushed: `v2-hybrid-routing` is 23 commits ahead of
-`origin/v2-hybrid-routing` once this section is committed; nothing was pushed.
+Blockers: none. Unpushed: `v2-hybrid-routing` is ahead of
+`origin/v2-hybrid-routing` by the commits carrying this section (the script and
+these docs); nothing was pushed, and `git status -sb` is authoritative for how
+many.
 
 
 
