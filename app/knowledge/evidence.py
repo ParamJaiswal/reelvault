@@ -163,24 +163,37 @@ def _ratio(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
-MIN_LOCAL_RUN = 5  # chars; shorter "matches" are shared letters, not shared text
+MIN_LOCAL_RUN = 5    # chars; shorter "matches" are shared letters, not shared text
+MAX_LOCAL_DRIFT = 16  # chars the probe/span offset may move inside one quote
 
 
 def _local_coverage(probe: str, hay: str) -> float:
-    """Fraction of the PROBE explained by in-order runs of at least
-    MIN_LOCAL_RUN chars inside the span. `SequenceMatcher.ratio()` divides by
-    len(probe)+len(span), so a 2,857-char page caps a quote that is fully
-    present there at 0.006 and the whole span is judged unrelated; dividing by
-    the probe alone is the only scale a quote can be judged on.
-    `autojunk=False` because the popular-element heuristic fires on a span this
-    long and discards real matches (measured: 0.0048 -> 0.0667 on the same
-    pair). Measured in docs/EVAL.md."""
+    """Fraction of the PROBE covered by one locally contiguous run of matches.
+
+    A quote is evidence only if the source says *this, in this order*. difflib
+    returns matching blocks ordered along the probe, so `m.b - m.a` is where each
+    block sits in the span: blocks sharing an offset are one contiguous run, and
+    an offset jump means the probe was stitched from disjoint regions of the
+    page. Summing every block instead scores such a stitch as verbatim. Real
+    edits move the offset a little, which is what MAX_LOCAL_DRIFT allows.
+    `autojunk=False` because difflib's popular-element heuristic fires on a span
+    this long and discards genuine matches. Measured in docs/EVAL.md."""
     if not probe or not hay:
         return 0.0
-    blocks = SequenceMatcher(None, probe, hay,
-                             autojunk=False).get_matching_blocks()
-    matched = sum(b.size for b in blocks if b.size >= MIN_LOCAL_RUN)
-    return min(1.0, matched / len(probe))
+    best = run = 0
+    prev_d: int | None = None
+    for m in SequenceMatcher(None, probe, hay,
+                             autojunk=False).get_matching_blocks():
+        if m.size < MIN_LOCAL_RUN:
+            continue
+        d = m.b - m.a          # m.a indexes the probe, m.b the span
+        if prev_d is not None and abs(d - prev_d) <= MAX_LOCAL_DRIFT:
+            run += m.size
+        else:
+            run = m.size
+        prev_d = d
+        best = max(best, run)
+    return best / len(probe)
 
 
 def _sim(a: str, b: str, containment_must_be_local: bool = False) -> float:
@@ -201,7 +214,10 @@ def _sim(a: str, b: str, containment_must_be_local: bool = False) -> float:
             return 1.0
         return 0.75
     if containment_must_be_local and len(a) >= MIN_STRONG_QUOTE_CHARS:
-        return _local_coverage(a, b)
+        # max(): a document chunk about the size of the quote is exactly what
+        # `SequenceMatcher.ratio()` measures well, and coverage is for the case
+        # ratio cannot see (span-dominated denominator). Neither regresses here.
+        return max(_ratio(a, b), _local_coverage(a, b))
     return _ratio(a, b)
 
 

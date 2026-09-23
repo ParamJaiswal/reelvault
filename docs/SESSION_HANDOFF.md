@@ -1470,30 +1470,39 @@ Phase: Phase 7 — fact accuracy / Evidence Ledger
 
 Done:
 - `app/knowledge/evidence.py`: new `_local_coverage`, reached from `_sim` only for
-  a **document** span and only for a quote at `MIN_STRONG_QUOTE_CHARS` or longer.
-  Such a quote is now scored by how much of the *quote* the span explains (in-order
-  `get_matching_blocks()` runs of ≥ `MIN_LOCAL_RUN` chars, ÷ `len(probe)`) instead
-  of by `SequenceMatcher.ratio()`, whose denominator the 2,810-char span dominates.
-  The Jaccard prefilter is bypassed on this branch (it is what made the class
-  unrecoverable) and `autojunk=False` is required at this span length.
-- 4 tests added to `tests/test_evidence_document_locality.py` (16 total), pinning
+  a **document** span and only for a quote at `MIN_STRONG_QUOTE_CHARS` or longer, as
+  `max(_ratio, _local_coverage)`. Such a quote is scored by how much of the *quote*
+  is carried by the longest **locally contiguous** run of difflib matching blocks,
+  instead of by `SequenceMatcher.ratio()`, whose denominator the 2,810-char span
+  dominates. The Jaccard prefilter is bypassed on this branch (it is what made the
+  class unrecoverable) and `autojunk=False` is required at this span length.
+- 6 tests added to `tests/test_evidence_document_locality.py` (18 total), pinning
   **both** acceptance sides.
 - `docs/EVAL.md`: the "Fix condition (NOT applied)" paragraph replaced by the
   applied record; header and the defect section's status updated.
 
 Verification:
-- Deterministic matcher A/B (HEAD from git vs working tree, same probe, real
+- Deterministic matcher A/B (`d60b631^` from git vs working tree, same probe, real
   paper-02 page 1): near-verbatim 98-char document quote **0.000 → 0.9898**
   (`find_evidence` 0.99, kept, `page=1`). `'Research'` **0.000 → 0.000** — it would
   be 1.000 without the 60-char floor, which is why the floor is tested. `'Difficult'`
   0.000 → 0.000. `_sim(..., False)` is byte-identical to `_ratio`, asserted.
-- `scripts/replay_matcher_rules.py --against HEAD` (20 rows, 94 raw facts, one
+- **The first version had a false-accept hole and review caught it.** Summing *all*
+  matching blocks scored a quote stitched from two disjoint regions of one page at
+  **0.9919** — indistinguishable from verbatim (pre-fix: 0.066, dropped). Coverage
+  now chains blocks only while `m.b - m.a` stays within `MAX_LOCAL_DRIFT = 16`, so
+  that probe reads **0.636** (partial, never strong) and a fabricated 105-char quote
+  reads **0.059**. `MIN_LOCAL_RUN` swept 3→8: true probes unchanged at 0.99, false
+  probe 0.089 → 0.000 — a noise filter, not a tuned threshold.
+- `scripts/replay_matcher_rules.py --against d60b631^` (20 rows, 94 raw facts, one
   extraction scored twice): kept **65 → 65**, 0 facts lost, 0 count flips. The rule
   fires once — paper-02 `topic='Transformer model'` **0.75 → 0.989**, i.e. weak
   support becomes strong support.
 - `scripts/audit_rescue.py` on the live library (30 reels, 73 values): document
   spans admit **0 foreign / 1 own** value — the false-accept door did not widen.
-- Suite: **354 passed, 3 skipped**.
+- Cost measured, not assumed: `find_evidence` 3.4 ms/fact on the real 2-page paper,
+  12.2 ms/fact against one 66k-char span.
+- Suite: **356 passed, 3 skipped**.
 
 Durable lesson: **for an evidence-matcher change, the row count is not the
 evidence.** Whether a golden row flips depends on which quotes the model happened

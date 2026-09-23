@@ -985,16 +985,28 @@ span **neither** similarity measure can express "this quote occurs here" — onl
 containment can, and one inflected word defeats it.
 
 **Fix applied — `app/knowledge/evidence.py:_local_coverage`.** The match is made
-scale-local, as above: for a document span only (`containment_must_be_local`) and
-a quote only at `MIN_STRONG_QUOTE_CHARS` or longer, `_sim` returns the fraction of
-the *quote* the span explains via `get_matching_blocks()` runs of ≥5 chars, divided
-by `len(quote)` — never by the span's length. The Jaccard prefilter is bypassed on
-that branch because it is the prefilter that made the class unrecoverable. `autojunk`
-is switched off: difflib's popular-element heuristic fires on a span this long and
+scale-local, as above: for a document span only (`containment_must_be_local`) and a
+quote only at `MIN_STRONG_QUOTE_CHARS` or longer, `_sim` returns
+`max(_ratio, _local_coverage)`, where coverage is the fraction of the *quote*
+carried by the longest **locally contiguous** run of `get_matching_blocks()` —
+never divided by the span's length. The Jaccard prefilter is bypassed on that branch
+because it is the prefilter that made the class unrecoverable. `autojunk` is
+switched off: difflib's popular-element heuristic fires on a span this long and
 discards genuine matches (measured on one pair: `ratio()` 0.0048 with the default,
 0.0667 with `autojunk=False` — both hopeless, but the run enumeration depends on
-it). Transcript, OCR and caption spans are untouched (different code path, different
-tuning).
+it). `max(_ratio, …)` because a document chunk about the size of the quote is
+exactly what `ratio()` measures well; on such a chunk coverage alone scored
+0.8068 where ratio gave 0.9133. Transcript, OCR and caption spans are untouched
+(different code path, different tuning).
+
+**Contiguity is the part that makes this safe.** The first version summed every
+matching block, and review caught it: a probe stitched from two disjoint regions of
+the same page is contiguous nowhere, yet scored **0.9919**, indistinguishable from
+a real quote (HEAD: 0.066, dropped). Blocks are ordered along the probe, so
+`m.b - m.a` says where each one sits in the span; a run continues while that offset
+drifts by at most `MAX_LOCAL_DRIFT = 16` (one edited word moves it by a few chars)
+and restarts otherwise. The same stitched probe now scores **0.636** — partial
+support, reported as such, never as verbatim.
 
 The two gates are what keep it honest, and both are tested:
 
@@ -1002,11 +1014,14 @@ The two gates are what keep it honest, and both are tested:
   incidentally by any large span — which is exactly the accident the containment
   budget was added to reject. `find_evidence("research","research",<that same
   2,857-char page>)` still returns **0.0**, even though `_local_coverage` on that
-  pair is 1.000. Matching runs shorter than `MIN_LOCAL_RUN = 5` chars are dropped
-  for the same reason: they are shared letters, not shared text.
+  pair is 1.000.
 - **Document-only.** `_sim(..., False)` is byte-identical to `_ratio`, asserted
   directly, so the 0.45 hallucination threshold's behaviour on speech/OCR is
   unchanged.
+- **Run floor.** `MIN_LOCAL_RUN = 5` drops matches shorter than a word. It is a
+  noise filter, not a tuned threshold: sweeping it 3→8 leaves both true probes at
+  0.9919 / 0.9898 unchanged and moves the fabricated probe 0.089→0.059→0.000, so
+  every value in that range clears the gate by ~8×. 5 is "not a letter fragment".
 
 Measured on both sides, per AGENTS.md §9. **Matcher level, deterministic** — probes
 run against the real paper-02 page-1 span (2,857 raw / 2,810 normalized chars),
@@ -1017,11 +1032,15 @@ HEAD matcher loaded from git vs the working tree:
 | 98-char doc quote, one word inflected, not exactly present anywhere | `_ratio` **0.000** (Jaccard 0.0574 → prefiltered at 0.20) | `_local_coverage` **0.9898** → `find_evidence` **0.99**, kept, `page=1` |
 | `'Research'` — the arXiv-boilerplate false-accept bait | `find_evidence` 0.000 | **0.000** (`_local_coverage` alone would be 1.000; the 60-char floor rejects it) |
 | `'Difficult'` — same class | 0.000 | **0.000** |
+| quote stitched from two disjoint page regions | 0.066 (dropped) | **0.9919** with an unbounded block sum — rejected in review — **0.636** as shipped: `test_a_quote_stitched_from_disjoint_page_regions_is_not_verbatim` |
+| 105-char quote absent from the page | 0.000 | **0.059**, `test_a_long_quote_absent_from_the_page_stays_rejected` |
 | two-word and mid-length value containment in a page (weak-support cap) | 0.75 | **0.75**, asserted by `test_two_word_value_inside_a_page_is_weak_never_strong` and `test_a_mid_length_phrase_in_a_page_is_capped` |
 | transcript / OCR / caption path | `_ratio` | **byte-identical**, asserted by `test_transcript_spans_keep_their_tuned_fuzzy_behavior` |
-| suite | 350 | **354 passed, 3 skipped** |
+| suite | 350 | **356 passed, 3 skipped** |
+| cost, `find_evidence` per fact | — | **3.4 ms** on the real 2-page paper; **12.2 ms** against a single 66k-char span (`autojunk=False` removes difflib's popular-element shortcut). ~100 facts on one body is 1.2 s, which is not a hot path here |
 
-**Row level** — `scripts/replay_matcher_rules.py --against HEAD`, one extraction
+**Row level** — `scripts/replay_matcher_rules.py --against d60b631^` (the commit
+before this rule existed), one extraction
 (94 raw facts over 20 rows) scored under both matchers: total kept **65 → 65, 0
 facts lost, 0 count flips**, widest span 2,810. The rule fires once and it fires
 exactly as designed: paper-02 `topic='Transformer model'` goes **0.75 → 0.989**,
@@ -1034,7 +1053,7 @@ the rule must not touch — a 28-char quote under the floor, and values like
 run's paper-01 quotes came back byte-verbatim, so containment already scored them
 1.0 and the rule had nothing to recover. Re-running that same cached extraction with
 one word of a verbatim quote altered (autoregressive → auto-regressive) moves it
-**0.75 → 0.986**, and pairing such a quote with a value the page does not contain
+**0.75 → 0.989**, and pairing such a quote with a value the page does not contain
 gives the 0.000 → 0.99 case in the table. So the honest reading is: on today's
 library this change upgrades the *strength* of document evidence rather than the
 *number* of facts, and the count effect will only be visible on the next fresh

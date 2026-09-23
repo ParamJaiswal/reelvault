@@ -181,11 +181,40 @@ def test_a_short_value_in_that_same_page_is_still_not_evidence():
 
 def test_local_coverage_is_not_applied_below_a_long_quote():
     """Below MIN_STRONG_QUOTE_CHARS a probe is satisfied incidentally by any
-    large span, so it keeps the old, weak verdict."""
-    probe = norm(_VERBATIM[:MIN_STRONG_QUOTE_CHARS - 20])
-    spans = _doc(_PAGE)
-    ev = find_evidence(probe, "transformer model", spans)
+    large span, so it keeps the old verdict — asserted on `_sim` directly, because
+    `find_evidence` caps a contained probe at 0.75 before scoring ever sees it."""
+    from app.knowledge.evidence import _ratio, _sim
+    probe = norm(_VERBATIM[:MIN_STRONG_QUOTE_CHARS - 20]) + " zzz absent"
+    assert MIN_QUOTE_CHARS <= len(probe) < MIN_STRONG_QUOTE_CHARS
+    assert probe not in norm(_PAGE)
+    assert _sim(probe, norm(_PAGE), True) == _ratio(probe, norm(_PAGE))
+
+
+def test_a_quote_stitched_from_disjoint_page_regions_is_not_verbatim():
+    """`_local_coverage` must not sum matches from anywhere in the span: a probe
+    made of the licence sentence followed by the body sentence is contiguous
+    nowhere, and an unbounded sum scored it 0.99 — indistinguishable from a real
+    quote. Partial support is the honest verdict; strong is not."""
+    from app.knowledge.evidence import _sim
+    stitch = norm("Provided proper attribution is provided the transformer model "
+                  "blocks scale quadratically with sequence lengths")
+    page = norm(_PAGE)
+    assert _sim(stitch, page, True) < 0.75, _sim(stitch, page, True)
+    ev = find_evidence(stitch, "transformer model", _doc(_PAGE))
+    # 0.75 here is the designed weak tier, reached by the VALUE being on the
+    # page — not by the stitched quote passing as verbatim.
     assert ev.similarity <= 0.75, ev.similarity
+
+
+def test_a_long_quote_absent_from_the_page_stays_rejected():
+    """The 0.45 hallucination gate has to hold for a probe this branch now
+    scores, not just for short values."""
+    from app.knowledge.evidence import HALLUCINATION_THRESHOLD
+    fake = ("the quarterly revenue guidance for fiscal year twenty twenty-six "
+            "exceeded analyst consensus by twelve percent")
+    assert len(norm(fake)) >= MIN_STRONG_QUOTE_CHARS
+    ev = find_evidence(fake, "revenue guidance", _doc(_PAGE))
+    assert ev.similarity < HALLUCINATION_THRESHOLD and ev.span is None
 
 
 def test_transcript_spans_keep_their_tuned_fuzzy_behavior():
