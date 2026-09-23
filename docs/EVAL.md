@@ -2,7 +2,8 @@
 
 **Last run:** September 23, 2026 (20-row, post-matcher-fix; see the final section) ·
 **Matcher replay:** September 23, 2026 · **Branch:** `v2-hybrid-routing` ·
-**Status: 20-row baseline; document-quote matching ceiling fixed; Phase 7
+**Status: 20-row baseline; document-quote matching ceiling fixed, and confirmed to
+have had no input to act on in the owner's three pre-fix document rows; Phase 7
 incomplete**
 
 Golden-set benchmark for classification, structured extraction, Evidence
@@ -1185,4 +1186,32 @@ to be exactly contained in that composite — no fuzzy measure involved. Before 
 it, the same offline classification above should say how many *live-library* facts it
 would recover, because the number on the golden set is 3 and the golden set's video
 rows are the ones that already pass.
+
+## September 23, 2026 — the document fix measured against the owner's own library
+
+The golden replay answers "did anything get lost". It cannot answer "what does the
+branch do on real rows", because the golden rows are fixtures. So the three live
+document rows that predate the fix were re-extracted (owner-approved, after a
+consistent online snapshot, with `user_corrected = 0` across all 105 stored facts so
+no manual edit was at risk): reels 26/27/28, `8 → 8`, `1 → 2`, `5 → 8` facts.
+
+**Zero of the four new facts came from `_local_coverage`.** Re-scoring each new
+document fact offline against its own row's stored spans: every one of their quotes
+is *verbatim contained* in a chunk, so `_sim` returns 1.0 at the
+`len(a) >= MIN_STRONG_QUOTE_CHARS` disjunct and control never reaches the branch.
+Sweeping all three rows for the shape the branch exists for — a document quote of
+`MIN_STRONG_QUOTE_CHARS` or longer that is **not** contained in any span — finds
+**none**. The +4 is second-pass model emission, and it is reported as that.
+
+Read together with the replay (which shows the rule firing exactly once, on
+`paper-02`'s `topic`, 0.75 → 0.98) the honest summary is: the branch is a **ceiling
+repair for a shape this library has not produced yet**, not a recall lever that has
+already paid. It is correct, monotone-safe, and currently inert on live data — which
+is worth stating plainly, because "we recovered 4 facts" would be a false attribution
+and the next reader has no way to re-derive either number from the database alone.
+
+This also leaves the cross-segment question above **unanswered**: dropped facts are
+written to the eval trace but not to the live schema, so counting how many library
+rows a composite transcript span would recover needs a re-extraction of the video
+rows with tracing on, not an offline query.
 

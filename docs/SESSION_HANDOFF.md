@@ -1575,9 +1575,111 @@ Next:
   live-library facts it recovers first; on the golden set the number is 3.
 
 Blockers: none. Unpushed: `v2-hybrid-routing` is 22 commits ahead of its remote;
-nothing was pushed this session. Owner-side items from the previous section still
-open: re-extract 26/27/28, delete junk reels 30/31, change the owner password and
-remove `data/.owner_credentials.txt`, rotate the Groq key that was pasted into chat.
+nothing was pushed this session. Owner-side items from the previous section were
+all actioned in the section that follows this one — **read that section before
+repeating any of it.**
+
+## Library maintenance, the owner credential, and what re-extraction proved (2026-09-23)
+
+Date: 2026-09-23
+Phase: Phase 7 — fact accuracy / Evidence Ledger
+
+Done:
+- Deleted the two junk rows left over from the Android emulator test: **reel 30**
+  (a 1,036-byte stub MP4 with no `moov` atom — the only `failed` reel and the only
+  `dead` job in the queue) and **reel 31** (`instagram.com/reel/TESTEMULATOR/`, a
+  fabricated URL that completed with 0 facts). Both through
+  `DELETE /api/reels/{id}` so media, frames, embeddings and the FTS shadow row go
+  with them. Library 30 → **28 reels**.
+- Re-extracted **26, 27, 28** (the three document rows whose facts predate the
+  matcher fix), owner-approved in session, after a consistent online snapshot:
+  `D:/reelvault-backups/db_pre_maintenance_20260923_224707.sqlite` (30 reels /
+  105 facts). Enqueued `classify_extract → embed → finalize`; extraction is
+  DELETE-then-INSERT (`app/pipeline/stages.py:525`) so nothing duplicates. Nothing
+  manual was at risk: **`user_corrected` is 0 for all 105 stored facts.**
+- Result: 26 `8 → 8` (`resources='Eight P100 GPUs'` in, `difficulty='Research'`
+  out), 27 `1 → 2` (gained `next_steps`, `difficulty` re-rolled from `Difficult`
+  to `Ambitious`), 28 `5 → 8`. Library **105 → 109 facts**, document-sourced
+  **15 → 16**.
+- **None of that gain is attributable to the shipped matcher branch.** Every new
+  document fact's quote is *verbatim contained* in its chunk, so `_sim` returns
+  1.0 at the `len(a) >= MIN_STRONG_QUOTE_CHARS` disjunct
+  (`app/knowledge/evidence.py:237-240`) and control never reaches
+  `_local_coverage`. Sweeping those three rows for the only input the branch can
+  act on — a document quote of `MIN_STRONG_QUOTE_CHARS` or longer that is **not**
+  verbatim contained in any span — finds **none**. The +4 is model emission on a
+  second pass, which is exactly the "the row count is not the evidence" lesson
+  above, now observed against the owner's real rows instead of the golden set.
+  `_local_coverage` stays proven only by the replay (paper-02 `topic`
+  0.75 → 0.98).
+- Added `scripts/set_owner_password.py` + `tests/test_owner_password.py` (3
+  tests). This closes the last Phase-2 credential item: `ensure_owner_user`
+  writes a plaintext password to `data/.owner_credentials.txt` **when it promotes
+  an owner row that lacks one** (the upgrade path this database came in by) and
+  `warn_if_owner_credentials_stale` logs until the file is gone, but **no route
+  changes a password** (`/api/auth/*` stops at login/refresh/logout/sessions), so
+  the file was simultaneously the only copy of the credential and the thing that
+  had to be removed. The script reads the replacement through `getpass` (never
+  argv, never echoed), refuses below 8 characters before touching the database,
+  and unlinks the file only after the transaction carrying the new hash has
+  committed — a refused password or a failed write therefore leaves the recorded
+  credential intact.
+- **Found, not fixed:** the *other* branch of `ensure_owner_user` — an empty
+  `users` table — hashes a `token_urlsafe(10)` password, inserts it, and returns
+  at `app/core/auth.py:130` **before** the file write. On a genuinely fresh
+  install the owner's password is therefore stored nowhere and password login is
+  unusable (the UI does not care: `/api/bootstrap` hands it the bearer token,
+  which is why nobody noticed). Fixing it means either writing the file on that
+  path too or forcing a claim-password first run — an owner decision about the
+  first-run UX, out of scope for this section, and the reason the tests here
+  create the file by hand rather than through `ensure_owner_user`.
+
+Verification:
+- Deletions checked in the database, not from the response body: `reels` 30 → 28
+  with no row for 30 or 31, `reels_fts_shadow` holds **0** rows whose `reel_id` is
+  absent from `reels`, `jobs` holds **0** non-`done` rows (the dead job left with
+  reel 30), and the stub file is gone from `media/video/`.
+- Re-extraction: queue drained to `pending: []` at 23:27:21 with all three rows
+  `('completed','done')`. `find_evidence` re-scored offline against each reel's
+  own stored spans returns **similarity 1.0** for every new document fact, and the
+  value is locatable in the stored `documents.body_text` (`Eight P100 GPUs` →
+  page-marked chunks 2 and 8). `POST /api/search` retrieves 26/27/28 for
+  "P100 GPUs", "great work frontier" and "self-attention".
+- `.venv/Scripts/python.exe -m pytest tests/ -q --ignore=tests/test_ai_eval.py` →
+  **361 passed, 3 skipped in 21.89 s**, run against the final working tree.
+  Targeted: `pytest tests/test_owner_password.py -q` → **3 passed in 1.38 s**.
+- Review round on this diff (Jev is owner-waived; `caveman:cavecrew-reviewer` is
+  the standing substitute) returned **0 blockers, 6 should-fix, 4 nits** and every
+  one of its three file:line claims re-checked true. Fixed: the false
+  "on first run" premise (both here and in the script docstring), a
+  `verify_password` read-back guard that could not fail because it read
+  pre-commit state on the same connection (deleted; the real guarantee is
+  unlink-after-commit), the `RuntimeError` branch that printed "nothing changed"
+  after the old hash was already gone, a third test that would have passed against
+  an implementation destroying the credential (now it asserts the file survives a
+  `LookupError`), and the over-scoped A/B sentence above. Rejected with reason:
+  catching `sqlite3.Error`/`OSError` in `main` to print "nothing changed" — a
+  commit-time `database is locked` or a failed unlink has an *unknown* outcome, so
+  the traceback is the truthful report.
+- Groq-key exposure measured, not assumed: the only Groq-shaped key is
+  `RV_LLM_API_KEY` in `.env` (56 chars, `gsk_` prefix, `.env` confirmed gitignored
+  via `git check-ignore`). The two `gsk_` matches in tracked files are a comment at
+  `.env.example:15` and the literal `gsk_from_env_file` in
+  `tests/test_llm_backend.py`. **Nothing to purge from the repository** — rotation
+  happens at the provider and only the owner can do it.
+
+Next:
+- Owner-side, both needing a secret this agent must not handle: run
+  `.venv/Scripts/python.exe scripts/set_owner_password.py` (it deletes
+  `data/.owner_credentials.txt` itself on success), and rotate the Groq key, then
+  paste the replacement into `.env` as `RV_LLM_API_KEY`.
+- The ±4-fact movement above is **one** observation on a runtime that is not
+  run-to-run reproducible. Re-extracting twice to separate signal from that noise
+  is not worth a session; the useful residue is the finding that the matcher
+  branch had no input to act on in the live library.
+
+Blockers: none. Unpushed: `v2-hybrid-routing` is 23 commits ahead of
+`origin/v2-hybrid-routing` once this section is committed; nothing was pushed.
 
 
 
