@@ -1469,52 +1469,63 @@ Date: 2026-09-23
 Phase: Phase 7 — fact accuracy / Evidence Ledger
 
 Done:
-- `app/knowledge/evidence.py`: new `_local_coverage`, reached from `_sim` only for
-  a **document** span and only for a quote at `MIN_STRONG_QUOTE_CHARS` or longer, as
-  `max(_ratio, _local_coverage)`. Such a quote is scored by how much of the *quote*
-  is carried by the longest **locally contiguous** run of difflib matching blocks,
-  instead of by `SequenceMatcher.ratio()`, whose denominator the 2,810-char span
-  dominates. The Jaccard prefilter is bypassed on this branch (it is what made the
-  class unrecoverable) and `autojunk=False` is required at this span length.
-- 7 tests added to `tests/test_evidence_document_locality.py` (19 total), pinning
-  **both** acceptance sides.
+- `app/knowledge/evidence.py`: new `_local_coverage`, reached from `_sim` only for a
+  **document** span and only for a quote at `MIN_STRONG_QUOTE_CHARS` or longer, as
+  `max(_ratio, _local_coverage)`. It returns the fraction of the *quote* carried by
+  one contiguous run of difflib matching blocks — which must start and end within
+  `MAX_LOCAL_DRIFT = 2` of the probe's own ends and carry `MIN_LOCAL_COVERAGE = 0.9`
+  of it — or **0.0**, so a declined quote gets precisely the verdict it had before
+  the branch existed. The old failure: `SequenceMatcher.ratio()` divides by
+  len(probe)+len(span), so a 2,810-char page capped a fully-present quote at 0.006.
+  Jaccard's prefilter is bypassed on this branch (it is what made the class
+  unrecoverable) and `autojunk=False` is required at this span length.
+- 7 tests added to `tests/test_evidence_document_locality.py` (19 total), one per
+  attack shape.
 - `docs/EVAL.md`: the "Fix condition (NOT applied)" paragraph replaced by the
-  applied record; header and the defect section's status updated.
+  applied record, including the three-round history and the accepted limit; header
+  and the defect section's status updated.
 
 Verification:
 - Deterministic matcher A/B (`d60b631^` from git vs working tree, same probe, real
   paper-02 page 1): near-verbatim 98-char document quote **0.000 → 0.9796**
-  (`find_evidence` 0.98, kept, `page=1`). `'Research'` **0.000 → 0.000** — it would
-  be 1.000 without the 60-char floor, which is why the floor is tested. `'Difficult'`
-  0.000 → 0.000. `_sim(..., False)` is byte-identical to `_ratio`, asserted.
-- **Two review rounds each found a false-accept hole in the new branch.** Round 1:
-  summing *all* matching blocks let a quote stitched from two disjoint regions of one
-  page score **0.9919**, indistinguishable from verbatim (pre-fix 0.066, dropped).
-  Round 2: chaining blocks along one diagonal fixed the stitch but made *elisions
-  free* — a verbatim quote with one source word deleted scored **1.0**, i.e. the
-  exact shape of a quote that drops a negation. Shipped rule: the diagonal may move
-  by at most `MAX_LOCAL_DRIFT = 2` and the drift is subtracted from the score, since
-  `Δ(m.b - m.a)` is exactly `span_gap - probe_gap` — a same-length typo moves it 0–1,
-  an elision moves it by the skipped text. Measured now: stitch **0.636**, one-word
-  elision **0.79**, fabricated 101-char quote **0.049**, both true quotes **0.99 /
-  0.98**. `MIN_LOCAL_RUN` swept 3→6: true probes unmoved, false probe 0.059–0.079 →
-  0.049 → 0.000, so it is a noise filter with ~9× margin, not a tuned threshold.
-- `scripts/replay_matcher_rules.py --against d60b631^` (20 rows, 94 raw facts, one
-  extraction scored twice): kept **65 → 65**, 0 facts lost, 0 count flips. The rule
-  fires once — paper-02 `topic='Transformer model'` **0.75 → 0.98**, i.e. weak
-  support becomes strong support.
+  (`find_evidence` 0.98, kept, `page=1`); a verbatim run with one same-length typo
+  **0.9672**. `'Research'` **0.000 → 0.000** — it would be 1.000 without the 60-char
+  floor, which is why the floor is tested. `'Difficult'` 0.000 → 0.000.
+  `_sim(..., False)` is byte-identical to `_ratio`, asserted.
+- **Three review rounds, each finding a false accept the previous version shipped.**
+  1. Summing *all* matching blocks: a quote stitched from two disjoint regions of one
+     page scored **0.9919** (pre-fix 0.066, dropped).
+  2. Diagonal chaining fixed the stitch and made *elisions free*: one deleted source
+     word scored a perfect **1.0** — the shape of a quote that drops a negation. The
+     diagonal moves by exactly `span_gap - probe_gap`, so `MAX_LOCAL_DRIFT = 2` plus
+     charging the drift separates a typo (0–1) from an elision (its full length).
+  3. Ends were unanchored: `"not " + verbatim run` scored **0.976**, since an edge
+     edit costs ~11% of a long quote. Hence the anchor and 0.9 requirements above.
+  Every attack probe now reads **0.000**: stitch, mid elision, both edited ends, and
+  a 101-char absent quote. `MIN_LOCAL_RUN` swept 3→6: true probes unmoved at 0.9919,
+  absent quote 0.059 → 0.079 → 0.049 → 0.000 — a noise filter with ~9× margin, not a
+  tuned threshold.
+- Accepted limit recorded in `docs/EVAL.md`: a mid-quote elision under ~8% of the
+  quote, and a same-length substitution (`scale` → `waist` = 0.959), are invisible to
+  any string measure. That is an entailment problem, not a matching problem.
+- `scripts/replay_matcher_rules.py` (20 rows, 94 raw facts, one extraction scored
+  twice), against both `d60b631^` and `ee9be18`: kept **65 → 65**, 0 facts lost, 0
+  count flips. The rule fires once — paper-02 `topic='Transformer model'` **0.75 →
+  0.98**, i.e. weak support becomes strong support.
 - `scripts/audit_rescue.py` on the live library (30 reels, 73 values): document
   spans admit **0 foreign / 1 own** value — the false-accept door did not widen.
 - Cost measured, not assumed: `find_evidence` 3.4 ms/fact on the real 2-page paper,
-  12.2 ms/fact against one 66k-char span.
+  11.8 ms/fact against one 66k-char span.
 - Suite: **357 passed, 3 skipped**.
 
 Durable lesson: **a loosened trust door needs an adversarial input pinned in the
-test, not just the positive case.** Both review rounds on this branch found the same
-shape — the new score behaved perfectly on the quote it was written for and accepted
-a quote that was never in the source. `test_a_quote_stitched_from_disjoint_page_regions_is_not_verbatim`
-and `test_a_quote_that_skips_source_text_is_not_verbatim` are those inputs; write one
-before shipping any change that can only raise a score.
+test, not just the positive case.** All three review rounds on this branch found the
+same shape — the new score behaved perfectly on the quote it was written for and
+accepted a quote that was never in the source.
+`test_a_quote_stitched_from_disjoint_page_regions_is_not_evidence` and
+`test_a_quote_that_skips_source_text_is_not_verbatim` are those inputs; write one
+before shipping any change that can only raise a score. The version that survived
+returns 0.0 rather than a smaller number, so it is monotone-safe by construction.
 
 Durable lesson: **for an evidence-matcher change, the row count is not the
 evidence.** Whether a golden row flips depends on which quotes the model happened

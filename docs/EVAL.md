@@ -984,70 +984,74 @@ Short foreign values score 0.000 the same way. In other words, for a large docum
 span **neither** similarity measure can express "this quote occurs here" — only exact
 containment can, and one inflected word defeats it.
 
-**Fix applied — `app/knowledge/evidence.py:_local_coverage`.** The match is made
-scale-local, as above: for a document span only (`containment_must_be_local`) and a
-quote only at `MIN_STRONG_QUOTE_CHARS` or longer, `_sim` returns
-`max(_ratio, _local_coverage)`, where coverage is the fraction of the *quote*
-carried by the longest **locally contiguous** run of `get_matching_blocks()` —
-never divided by the span's length. The Jaccard prefilter is bypassed on that branch
-because it is the prefilter that made the class unrecoverable. `autojunk` is
-switched off: difflib's popular-element heuristic fires on a span this long and
-discards genuine matches (measured on one pair: `ratio()` 0.0048 with the default,
-0.0667 with `autojunk=False` — both hopeless, but the run enumeration depends on
-it). `max(_ratio, …)` because a document chunk about the size of the quote is
-exactly what `ratio()` measures well; on such a chunk (a 119-char sentence with two
-words substituted) coverage alone scored 0.7282 where ratio gave 0.9384. Transcript,
-OCR and caption spans are untouched (different code path, different tuning).
+**Fix applied — `app/knowledge/evidence.py:_local_coverage`.** For a document span
+only (`containment_must_be_local`) and a quote only at `MIN_STRONG_QUOTE_CHARS` or
+longer, `_sim` now takes `max(_ratio, _local_coverage)`, where coverage is the
+fraction of the *quote* carried by one contiguous run of `get_matching_blocks()` —
+divided by the quote, never by the span. The Jaccard prefilter is bypassed on that
+branch because it is the prefilter that made the class unrecoverable, and
+`autojunk=False` because difflib's popular-element heuristic fires on a span this
+long and discards genuine matches (`ratio()` on one pair: 0.0048 default, 0.0667
+without — both hopeless, but the run enumeration depends on it). `max(_ratio, …)`
+because a document chunk about the size of the quote is what `ratio()` measures
+well (119-char sentence, two words substituted: ratio 0.9384, coverage 0.7282).
+Transcript, OCR and caption spans keep `_ratio` untouched.
 
-**Contiguity is the part that makes this safe, and it took two review rounds to
-get.** The first version summed every matching block: a probe stitched from two
-disjoint regions of one page scored **0.9919**, indistinguishable from a real quote
-(pre-fix: 0.066, dropped). Chaining blocks on one diagonal fixed the stitch but made
-*elisions free* — dropping a source word keeps the probe contiguous, so an
-otherwise-verbatim 119-char quote with one word removed scored a perfect **1.0**,
-which is exactly how a quote that quietly deletes a negation would be certified as
-exact. Both are now handled by the same quantity: between consecutive blocks the
-probe advances `p_gap` and the span advances `s_gap`, and the diagonal moves by
-exactly `s_gap - p_gap`. A same-length typo (propose → proposed) moves it by 0–1; an
-elision moves it by the skipped text's full length. So a run continues only within
-`MAX_LOCAL_DRIFT = 2`, and the drift it did take is subtracted from its score.
-Measured: stitch **0.636**, one-word elision **0.79**, both true quotes **0.99 /
-0.98**, fabricated 101-char quote **0.049**. Partial support is still kept — the
-0.45 gate is doing its job — but nothing short of exact containment reads as
-verbatim any more.
+**The branch certifies or says nothing, and that property is what three review
+rounds bought.** Each round found the same shape — perfect on the quote it was
+written for, accepting a quote the source never contained:
 
-Three limits keep it honest. The first two are tested; the third is swept, not
-pinned:
+1. Summing *every* matching block: a probe stitched from two disjoint regions of one
+   page scored **0.9919**, indistinguishable from verbatim (pre-fix 0.066, dropped).
+2. Chaining blocks along one diagonal fixed the stitch but made *elisions free*:
+   deleting one word from an otherwise verbatim run scored a perfect **1.0** — the
+   exact shape of a quote that quietly drops a negation. Between consecutive blocks
+   the probe advances `p_gap` and the span `s_gap`, and the diagonal moves by exactly
+   `s_gap - p_gap`, so one quantity separates the two: a same-length typo (propose →
+   proposed) moves it 0–1, an elision moves it by the skipped text. Runs continue
+   within `MAX_LOCAL_DRIFT = 2` and pay their drift.
+3. Ends were still unanchored: `"not " + <123-char verbatim run>` scored **0.976**,
+   because an edit near either end costs ~11% of a long quote. So the best run must
+   start and end within `MAX_LOCAL_DRIFT` of the probe's own ends, and must carry
+   `MIN_LOCAL_COVERAGE = 0.9` of it.
 
-- **Length floor.** Below `MIN_STRONG_QUOTE_CHARS` a short probe is satisfied
-  incidentally by any large span — which is exactly the accident the containment
-  budget was added to reject. `find_evidence("research","research",<that same
-  2,857-char page>)` still returns **0.0**, even though `_local_coverage` on that
-  pair is 1.000.
-- **Document-only.** `_sim(..., False)` is byte-identical to `_ratio`, asserted
-  directly, so the 0.45 hallucination threshold's behaviour on speech/OCR is
-  unchanged.
-- **Run floor.** `MIN_LOCAL_RUN = 5` ignores matches shorter than a word. Sweeping
-  it 3→6 leaves both true probes fixed at 0.9919 while the fabricated probe moves
-  0.059 → 0.079 → 0.049 → 0.000, i.e. it is a noise filter with an ~9× margin to
-  the gate, not a tuned threshold. 5 means "not a letter fragment".
+Anything failing those returns **0.0** from the branch and falls through to `_ratio`,
+i.e. gets exactly the verdict it had before this change existed. The branch therefore
+cannot weaken a score and cannot keep a fact that both old measures rejected unless
+the quote really is the span's own text.
 
-Measured on both sides, per AGENTS.md §9. **Matcher level, deterministic** — probes
-run against the real paper-02 page-1 span (2,857 raw / 2,810 normalized chars),
-HEAD matcher loaded from git vs the working tree:
+Measured, all against the fixture page or the real paper-02 page 1 (2,857 raw /
+2,810 normalized chars):
 
-| Check | HEAD | working tree |
+| Probe | Before the fix | Shipped |
 |---|---|---|
-| 98-char doc quote, one word inflected, not exactly present anywhere | `_ratio` **0.000** (Jaccard 0.0574 → prefiltered at 0.20) | `_local_coverage` **0.9796** → `find_evidence` **0.98**, kept, `page=1` |
-| `'Research'` — the arXiv-boilerplate false-accept bait | `find_evidence` 0.000 | **0.000** (`_local_coverage` alone would be 1.000; the 60-char floor rejects it) |
-| `'Difficult'` — same class | 0.000 | **0.000** |
-| quote stitched from two disjoint page regions | 0.066 (dropped) | **0.9919** with an unbounded block sum, **1.0** with gap-free chaining — both rejected in review — **0.636** as shipped: `test_a_quote_stitched_from_disjoint_page_regions_is_not_verbatim` |
-| verbatim quote with one source word removed (the negation shape) | 0.000 (dropped) | **1.0** under gap-free chaining — rejected in review — **0.79** as shipped: `test_a_quote_that_skips_source_text_is_not_verbatim` |
-| 101-normalized-char quote absent from the page | 0.000 | **0.049**, `test_a_long_quote_absent_from_the_page_stays_rejected` |
-| two-word and mid-length value containment in a page (weak-support cap) | 0.75 | **0.75**, asserted by `test_two_word_value_inside_a_page_is_weak_never_strong` and `test_a_mid_length_phrase_in_a_page_is_capped` |
-| transcript / OCR / caption path | `_ratio` | **byte-identical**, asserted by `test_transcript_spans_keep_their_tuned_fuzzy_behavior` |
+| 98-char doc quote, one word inflected, not exactly present | `_ratio` **0.000** (Jaccard 0.0574, prefiltered at 0.20) | **0.9796**, `find_evidence` **0.98**, kept, `page=1` |
+| verbatim run with one same-length typo (`scale` → `skip`) | 0.000 | **0.9672** |
+| same run with `research ` deleted (mid elision) | 0.000 | **0.000** — 1.0 at round 2 |
+| `"not "` prepended / `, not` appended to the run | 0.000 | **0.000** — 0.976 / 0.969 at round 3 |
+| quote stitched from two disjoint page regions | 0.066 | **0.000** — 0.9919 at round 1 |
+| 101-normalized-char quote absent from the page | 0.000 | **0.000** — 0.049 at round 2 |
+| `'Research'` / `'Difficult'` — the arXiv-boilerplate bait | 0.000 | **0.000** (coverage would be 1.000; the 60-char floor declines before the branch runs) |
+| two-word and mid-length value containment in a page | 0.75 | **0.75** unchanged, `test_two_word_value_inside_a_page_is_weak_never_strong`, `test_a_mid_length_phrase_in_a_page_is_capped` |
+| transcript / OCR / caption path | `_ratio` | **byte-identical**, `test_transcript_spans_keep_their_tuned_fuzzy_behavior` |
 | suite | 350 | **357 passed, 3 skipped** |
-| cost, `find_evidence` per fact | — | **3.4 ms** on the real 2-page paper; **12.2 ms** against a single 66k-char span (`autojunk=False` removes difflib's popular-element shortcut). ~100 facts on one body is 1.2 s, which is not a hot path here |
+| `find_evidence` cost per fact | — | **3.4 ms** on the real 2-page paper, **11.8 ms** on one 66k-char span |
+
+`MIN_LOCAL_RUN = 5` (matches shorter than a word are ignored) is a noise filter, not
+a tuned threshold: sweeping it 3→6 leaves both true probes at 0.9919 while the
+absent-quote probe moves 0.059 → 0.079 → 0.049 → 0.000, ~9× below the gate.
+
+**Accepted limit, stated rather than hidden:** a *mid-quote* elision shorter than ~8%
+of the quote stays inside 0.9 and is invisible to a string measure — as is a
+same-length substitution (`scale` → `waist` scores 0.959). Neither the claim-term gate
+nor this branch reads meaning; the quote and its page are shown to the owner, which
+is the only defence the design has. Fixing that needs entailment, not matching.
+
+Every row above is a committed test, not a notebook number:
+`test_a_quote_that_skips_source_text_is_not_verbatim` (mid elision, both edited ends,
+and the typo that must still pass),
+`test_a_quote_stitched_from_disjoint_page_regions_is_not_evidence`, and
+`test_a_long_quote_absent_from_the_page_stays_rejected`.
 
 **Row level** — `scripts/replay_matcher_rules.py --against d60b631^` (the commit
 before this rule existed), one extraction

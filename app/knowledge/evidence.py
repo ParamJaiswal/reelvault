@@ -164,6 +164,7 @@ def _ratio(a: str, b: str) -> float:
 
 
 MIN_LOCAL_RUN = 5   # chars; shorter "matches" are shared letters, not shared text
+MIN_LOCAL_COVERAGE = 0.9  # below this the span is not carrying THIS quote
 # What one quote may skip in the SOURCE and still count as verbatim. Between two
 # difflib blocks the probe advances by `p_gap` and the span by `s_gap`, and
 # `abs((m.b - m.a) - prev_d) == abs(s_gap - p_gap)`: a same-length substitution
@@ -173,17 +174,23 @@ MAX_LOCAL_DRIFT = 2
 
 
 def _local_coverage(probe: str, hay: str) -> float:
-    """Fraction of the PROBE carried by one locally contiguous run of matches.
+    """Fraction of the PROBE carried by one contiguous run that spans all of it,
+    or 0.0 when it does not. This branch certifies; it never downgrades, so every
+    input it declines gets exactly the verdict it had before the branch existed.
 
     A quote is evidence only if the source says *this, in this order*. difflib
     returns matching blocks ordered along the probe, so `m.b - m.a` is where each
-    block sits in the span: blocks on one diagonal are one contiguous run, and a
-    jump means the quote was stitched from, or skipped, parts of the page. Summing
-    every block instead scores such a quote as verbatim. `autojunk=False` because
-    difflib's popular-element heuristic fires on a span this long and discards
-    genuine matches. Measured in docs/EVAL.md.
+    block sits in the span: blocks on one diagonal are one contiguous run. Summing
+    every block instead certifies a quote stitched from disjoint parts of the page;
+    chaining blocks without charging the diagonal lets a quote that simply SKIPS
+    source text pass as exact; a run that does not reach both ends of the probe
+    leaves text at an edge that the source never said. All three are measured in
+    docs/EVAL.md. `autojunk=False` because difflib's popular-element heuristic fires
+    on a span this long and discards genuine matches.
     """
     best = run = 0
+    best_start = best_end = 0
+    start = 0
     prev_d: int | None = None
     for m in SequenceMatcher(None, probe, hay,
                              autojunk=False).get_matching_blocks():
@@ -193,10 +200,13 @@ def _local_coverage(probe: str, hay: str) -> float:
         if prev_d is not None and abs(d - prev_d) <= MAX_LOCAL_DRIFT:
             run += m.size - abs(d - prev_d)   # elisions are never free
         else:
-            run = m.size
+            run, start = m.size, m.a
         prev_d = d
-        best = max(best, run)
-    return best / len(probe)
+        if run > best:
+            best, best_start, best_end = run, start, m.a + m.size
+    if best_start > MAX_LOCAL_DRIFT or len(probe) - best_end > MAX_LOCAL_DRIFT:
+        return 0.0
+    return best / len(probe) if best >= MIN_LOCAL_COVERAGE * len(probe) else 0.0
 
 
 def _sim(a: str, b: str, containment_must_be_local: bool = False) -> float:
@@ -204,11 +214,12 @@ def _sim(a: str, b: str, containment_must_be_local: bool = False) -> float:
     (`containment_must_be_local`), verbatim presence proves the claim only when
     the span is about the size of the quote or the quote is long enough to be no
     coincidence; otherwise it is the designed weak support (0.75). A long quote
-    that is not exactly verbatim is judged by how much of the QUOTE the span
-    explains, for the same reason: below MIN_STRONG_QUOTE_CHARS a short probe is
-    satisfied incidentally by any large span, which is the accident the
-    containment budget exists to reject. Transcript, OCR and caption spans keep
-    their tuned behavior."""
+    may alternatively be certified by `_local_coverage`, which requires the span
+    to carry all but a typo of it as ONE contiguous run; a quote it declines falls
+    through to `_ratio`, so the branch can only ever add a strong verdict. Below
+    MIN_STRONG_QUOTE_CHARS a short probe is satisfied incidentally by any large
+    span, which is the accident the containment budget exists to reject.
+    Transcript, OCR and caption spans keep their tuned behavior."""
     if not a or not b:
         return 0.0
     if len(a) >= MIN_QUOTE_CHARS and a in b:
