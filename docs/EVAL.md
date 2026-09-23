@@ -1,8 +1,9 @@
 # AI Extraction Evaluation
 
-**Last run:** September 22, 2026 (20-row baseline) · **Matcher replay re-run:**
-September 23, 2026 · **Branch:** `v2-hybrid-routing` · **Status: 20-row baseline;
-document-quote matching ceiling fixed; Phase 7 incomplete**
+**Last run:** September 23, 2026 (20-row, post-matcher-fix; see the final section) ·
+**Matcher replay:** September 23, 2026 · **Branch:** `v2-hybrid-routing` ·
+**Status: 20-row baseline; document-quote matching ceiling fixed; Phase 7
+incomplete**
 
 Golden-set benchmark for classification, structured extraction, Evidence
 Ledger validation, and deadline parsing against the real Qwen/llama.cpp path
@@ -1107,4 +1108,42 @@ will no longer be silently discarded.
 `.gitignore` covered `.env` but not `.env.bak*`; a config backup containing a live
 cloud key sat untracked in the repo root. Rule added. `.env.example` verified still
 tracked (the pattern is deliberately narrower than `.env.*`).
+
+## September 23, 2026 — fresh 20-row run after the matcher fix
+
+`pytest tests/test_ai_eval.py -q -s` → **1 passed in 187.40 s**, 20 cases,
+`router_served_by_counts: {"llamacpp": 20}` — local `qwen2.5-3b-instruct`, no cloud.
+Results: `D:/Temp/user/rv_test_odw51jgi/eval_results.json` (private, not committed).
+Run without `RV_EVAL_TRACE=1`, so per-case kept *values* are not in the file.
+
+| Metric v2 | Sep 23 | Sep 22 | Sep 20 (19-row) |
+|---|---:|---:|---:|
+| Schema agreement | 0.700 (14/20) | 0.700 | 0.688 |
+| Kept-fact named-field recall | 0.760 (19/25) | 0.760 | 0.810 |
+| Content presence (taxonomy-gap, n=3) | **0.333** | 0.000 | 0.667 |
+| Evidence-kept facts | **65** | 68 | 66 |
+| Unsupported-kept rate | 0.108 (7/65) | 0.103 (7/68) | 0.036 |
+| Minimum-kept rate | **0.850** (17/20) | 0.900 | 0.875 |
+| Deadline parse recall | 1.000 (4/4) | 1.000 | 1.000 |
+| Category multilabel / macro-F1 | 0.750 / 0.525 | 0.750 / 0.525 | 0.750 / 0.509 |
+| Malformed JSON | 0.000 | 0.000 | 0.000 |
+| Mean per-reel latency (classify + extract) | 9.33 s (0.80 + 8.53) | 8.47 s | 7.32 s |
+
+Classification is byte-identical to Sep 22 on all five reported numbers, which is
+what a temperature-0 classifier looks like; everything that moved is at fact level,
+i.e. inside the run-to-run band this document already warns about.
+
+**The matcher change is not what moved anything here.** Three rows now miss
+`min_facts_kept`: `recipe-01` (needs 2, emitted 1 fact total), `edu-05` (needs 2,
+emitted 7 facts, all 7 dropped as unsupported) and `hinglish-01` (needs 1, emitted
+1, dropped). The two paper rows are fine: `paper-01` kept 3, `paper-02` kept 2
+against `min_facts_kept: 1`. The deterministic replay (`--against ee9be18`, same
+extraction scored both ways) remains the evidence for the matcher change: **65 → 65
+kept, 0 lost**. `edu-05` is the row to look at next — 7 raw facts, 7 dropped, on a
+real-source LinkedIn excerpt, is the accepted model-capability ceiling still holding.
+
+**Content presence 0.000 → 0.333.** One of the three taxonomy-gap needles landed
+this time; the trace needed to name which one was not captured (`RV_EVAL_TRACE=1`
+next run if attribution matters). Recorded as the same structurally fragile n=3
+metric, not as a gain: a single item moves it by 0.333 in either direction.
 

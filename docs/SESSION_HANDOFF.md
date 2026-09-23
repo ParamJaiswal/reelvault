@@ -1529,6 +1529,14 @@ Verification:
 - Cost measured, not assumed: `find_evidence` 3.7 ms/fact on the real 2-page paper,
   12.0 ms/fact against one 66k-char span.
 - Suite: **358 passed, 3 skipped**.
+- Fresh 20-row golden eval after the fix: `pytest tests/test_ai_eval.py -q -s` →
+  **1 passed in 187.40 s**, all 20 served by llamacpp. Kept 65, dropped 38,
+  unsupported-kept 0.108, deadlines 4/4, malformed JSON 0, schema agreement 0.700,
+  field recall 0.760, content presence 0.333, 9.33 s/reel. Classification numbers
+  are byte-identical to the Sep 22 run; what moved is at fact level. Three rows now
+  miss `min_facts_kept` (`recipe-01` emitted 1 of 2, `edu-05` had all 7 raw facts
+  dropped, `hinglish-01` had its 1 dropped); both paper rows clear their floor.
+  Details in `docs/EVAL.md`, "September 23, 2026".
 
 Durable lesson: **a loosened trust door needs an adversarial input pinned in the
 test, not just the positive case.** All four review rounds on this branch found the
@@ -1550,13 +1558,14 @@ quoted from an earlier run in this session's own working notes (61→64, a
 second 0.0→0.86 flip set) did not reproduce and were deleted rather than committed.
 
 Next:
-- One fresh 20-row golden eval to refresh the baseline table in `docs/EVAL.md`
-  (paper rows should gain fact *strength*; counts may not move).
+- Classify `edu-05`'s 7 dropped facts: correct rejections (model paraphrased) or
+  false rejects (the matcher still can't see them). Needs one `RV_EVAL_TRACE=1`
+  run on that row, which also names the content-presence hit.
 
-Blockers: none. Unpushed: `v2-hybrid-routing` is ahead of its remote; nothing was
-pushed this session. Owner-side items from the previous section still open:
-re-extract 26/27/28, delete junk reels 30/31, change the owner password and remove
-`data/.owner_credentials.txt`, rotate the Groq key that was pasted into chat.
+Blockers: none. Unpushed: `v2-hybrid-routing` is 21 commits ahead of its remote;
+nothing was pushed this session. Owner-side items from the previous section still
+open: re-extract 26/27/28, delete junk reels 30/31, change the owner password and
+remove `data/.owner_credentials.txt`, rotate the Groq key that was pasted into chat.
 
 
 
