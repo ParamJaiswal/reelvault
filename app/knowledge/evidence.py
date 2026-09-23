@@ -163,12 +163,36 @@ def _ratio(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+MIN_LOCAL_RUN = 5  # chars; shorter "matches" are shared letters, not shared text
+
+
+def _local_coverage(probe: str, hay: str) -> float:
+    """Fraction of the PROBE explained by in-order runs of at least
+    MIN_LOCAL_RUN chars inside the span. `SequenceMatcher.ratio()` divides by
+    len(probe)+len(span), so a 2,857-char page caps a quote that is fully
+    present there at 0.006 and the whole span is judged unrelated; dividing by
+    the probe alone is the only scale a quote can be judged on.
+    `autojunk=False` because the popular-element heuristic fires on a span this
+    long and discards real matches (measured: 0.0048 -> 0.0667 on the same
+    pair). Measured in docs/EVAL.md."""
+    if not probe or not hay:
+        return 0.0
+    blocks = SequenceMatcher(None, probe, hay,
+                             autojunk=False).get_matching_blocks()
+    matched = sum(b.size for b in blocks if b.size >= MIN_LOCAL_RUN)
+    return min(1.0, matched / len(probe))
+
+
 def _sim(a: str, b: str, containment_must_be_local: bool = False) -> float:
     """How present a claimed QUOTE is in a span. For document spans
     (`containment_must_be_local`), verbatim presence proves the claim only when
     the span is about the size of the quote or the quote is long enough to be no
-    coincidence; otherwise it is the designed weak support (0.75). Transcript,
-    OCR and caption spans keep their tuned behavior."""
+    coincidence; otherwise it is the designed weak support (0.75). A long quote
+    that is not exactly verbatim is judged by how much of the QUOTE the span
+    explains, for the same reason: below MIN_STRONG_QUOTE_CHARS a short probe is
+    satisfied incidentally by any large span, which is the accident the
+    containment budget exists to reject. Transcript, OCR and caption spans keep
+    their tuned behavior."""
     if not a or not b:
         return 0.0
     if len(a) >= MIN_QUOTE_CHARS and a in b:
@@ -176,6 +200,8 @@ def _sim(a: str, b: str, containment_must_be_local: bool = False) -> float:
                 or _containment_is_local(a, b)):
             return 1.0
         return 0.75
+    if containment_must_be_local and len(a) >= MIN_STRONG_QUOTE_CHARS:
+        return _local_coverage(a, b)
     return _ratio(a, b)
 
 

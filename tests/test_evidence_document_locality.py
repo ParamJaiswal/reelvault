@@ -144,3 +144,57 @@ def test_no_probe_below_the_quote_floor_can_score_a_perfect_match():
     exact = "y" * MIN_QUOTE_CHARS
     spans2 = build_spans([{"text": "x" * 20 + " " + exact, "start_s": 1.0}], [], "")
     assert find_evidence(exact, exact, spans2).similarity == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Near-verbatim quotes in a large document span.
+#
+# Both similarity measures in `_ratio` divide by a quantity the SPAN dominates:
+# Jaccard by |A∪B| and SequenceMatcher.ratio() by len(a)+len(b). Measured on a
+# 2,857-char page, a quote that is fully present there except for one inflected
+# word scores Jaccard 0.053 (prefiltered to 0.0) and ratio 0.006 — so it was
+# dropped as a hallucination. docs/EVAL.md, 2026-09-22. `_sim` now judges a
+# long document quote by how much of the QUOTE the span explains.
+
+
+_QUOTE = ("attention mechanisms and research on encoding schemes: the "
+          "transformer model blocks scale quadratically with sequence lengths")
+# same run with the one inflected word restored, i.e. exactly verbatim
+_VERBATIM = _QUOTE[:-1]
+
+
+def test_a_long_near_verbatim_document_quote_is_recovered():
+    """One inflected word must not destroy an otherwise verbatim 120-char run."""
+    spans = _doc(_PAGE)
+    assert _QUOTE not in spans[0].text          # not exact: the whole point
+    ev = find_evidence(_QUOTE, "transformer model", spans)
+    assert ev.similarity >= 0.90, ev.similarity
+    assert ev.span is not None and ev.span.page == 1
+
+
+def test_a_short_value_in_that_same_page_is_still_not_evidence():
+    """The recovery must not re-open the door the containment budget closed:
+    'research' occurs in this page dozens of times and proves nothing."""
+    spans = _doc(_PAGE)
+    assert find_evidence("research", "research", spans).similarity == 0.0
+
+
+def test_local_coverage_is_not_applied_below_a_long_quote():
+    """Below MIN_STRONG_QUOTE_CHARS a probe is satisfied incidentally by any
+    large span, so it keeps the old, weak verdict."""
+    probe = norm(_VERBATIM[:MIN_STRONG_QUOTE_CHARS - 20])
+    spans = _doc(_PAGE)
+    ev = find_evidence(probe, "transformer model", spans)
+    assert ev.similarity <= 0.75, ev.similarity
+
+
+def test_transcript_spans_keep_their_tuned_fuzzy_behavior():
+    """Scoped to documents by measurement, not assumption — a transcript segment
+    is short, so the global ratio is fine there and must stay byte-identical."""
+    from app.knowledge.evidence import _ratio, _sim
+    seg = norm("the transformer blocks scale quadratically with sequence length")
+    probe = norm("the transformer blocks scale quadratically with sequence lengths")
+    assert _sim(probe, seg, False) == _ratio(probe, seg)
+    spans = [SourceSpan(text=seg, t_s=3.0, source="transcript")]
+    ev = find_evidence(probe, "transformer blocks", spans)
+    assert ev.similarity >= 0.90 and ev.span.t_s == 3.0

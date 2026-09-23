@@ -1450,8 +1450,9 @@ Verification:
   independently surfaced the text-source ingest clobber before it was fixed.
 - `.env` is gitignored but a config **backup is not**: `.env.bak-*` sat in the
   repo root holding the live Groq key, one `git add .` from being committed.
-  Moved to `D:/Temp/user/reelvault_env.bak-20260922-085924`. Consider adding
-  `.env.bak*` to `.gitignore` — not done, it is the owner's ignore file.
+  Moved to `D:/Temp/user/reelvault_env.bak-20260922-085924`, and `b6fb5e5`
+  added `.env.bak*` to `.gitignore` (verified `.env.example` is still tracked —
+  the pattern is narrower than `.env.*`).
 - Reels 30/31 are emulator-test junk (30 = invalid stub MP4, `failed`;
   31 = fake URL, `completed`, no facts). Owner left them in place.
 - **Background processes started from the agent do not persist** — the app died
@@ -1460,5 +1461,58 @@ Verification:
 - Unpushed: `v2-hybrid-routing` is ahead of its remote; nothing was pushed.
 - Git hygiene: `06be8bd`'s subject duplicates `03c0f88`'s; it is the refinement
   of that fix, not a repeat. Left as-is rather than amended.
+
+
+## Document-quote matching ceiling fixed (2026-09-23)
+
+Date: 2026-09-23
+Phase: Phase 7 — fact accuracy / Evidence Ledger
+
+Done:
+- `app/knowledge/evidence.py`: new `_local_coverage`, reached from `_sim` only for
+  a **document** span and only for a quote at `MIN_STRONG_QUOTE_CHARS` or longer.
+  Such a quote is now scored by how much of the *quote* the span explains (in-order
+  `get_matching_blocks()` runs of ≥ `MIN_LOCAL_RUN` chars, ÷ `len(probe)`) instead
+  of by `SequenceMatcher.ratio()`, whose denominator the 2,810-char span dominates.
+  The Jaccard prefilter is bypassed on this branch (it is what made the class
+  unrecoverable) and `autojunk=False` is required at this span length.
+- 4 tests added to `tests/test_evidence_document_locality.py` (16 total), pinning
+  **both** acceptance sides.
+- `docs/EVAL.md`: the "Fix condition (NOT applied)" paragraph replaced by the
+  applied record; header and the defect section's status updated.
+
+Verification:
+- Deterministic matcher A/B (HEAD from git vs working tree, same probe, real
+  paper-02 page 1): near-verbatim 98-char document quote **0.000 → 0.9898**
+  (`find_evidence` 0.99, kept, `page=1`). `'Research'` **0.000 → 0.000** — it would
+  be 1.000 without the 60-char floor, which is why the floor is tested. `'Difficult'`
+  0.000 → 0.000. `_sim(..., False)` is byte-identical to `_ratio`, asserted.
+- `scripts/replay_matcher_rules.py --against HEAD` (20 rows, 94 raw facts, one
+  extraction scored twice): kept **65 → 65**, 0 facts lost, 0 count flips. The rule
+  fires once — paper-02 `topic='Transformer model'` **0.75 → 0.989**, i.e. weak
+  support becomes strong support.
+- `scripts/audit_rescue.py` on the live library (30 reels, 73 values): document
+  spans admit **0 foreign / 1 own** value — the false-accept door did not widen.
+- Suite: **354 passed, 3 skipped**.
+
+Durable lesson: **for an evidence-matcher change, the row count is not the
+evidence.** Whether a golden row flips depends on which quotes the model happened
+to emit (this run's paper-01 quotes came back byte-verbatim, so containment already
+scored them 1.0), and llama-server is not run-to-run reproducible here. The
+deterministic HEAD-vs-tree comparison on a fixed probe is the measurement; the
+replay's job is only to prove nothing was *lost*. Say so in the doc, and never
+carry a number forward that the current session cannot re-derive — three figures
+quoted from an earlier run in this session's own working notes (61→64, a
+second 0.0→0.86 flip set) did not reproduce and were deleted rather than committed.
+
+Next:
+- One fresh 20-row golden eval to refresh the baseline table in `docs/EVAL.md`
+  (paper rows should gain fact *strength*; counts may not move).
+
+Blockers: none. Unpushed: `v2-hybrid-routing` is ahead of its remote; nothing was
+pushed this session. Owner-side items from the previous section still open:
+re-extract 26/27/28, delete junk reels 30/31, change the owner password and remove
+`data/.owner_credentials.txt`, rotate the Groq key that was pasted into chat.
+
 
 

@@ -1,6 +1,8 @@
 # AI Extraction Evaluation
 
-**Last run:** September 22, 2026 · **Branch:** `v2-hybrid-routing` · **Status: 20-row baseline; Phase 7 incomplete**
+**Last run:** September 22, 2026 (20-row baseline) · **Matcher replay re-run:**
+September 23, 2026 · **Branch:** `v2-hybrid-routing` · **Status: 20-row baseline;
+document-quote matching ceiling fixed; Phase 7 incomplete**
 
 Golden-set benchmark for classification, structured extraction, Evidence
 Ledger validation, and deadline parsing against the real Qwen/llama.cpp path
@@ -946,6 +948,10 @@ crosses a multi-page document span.
 
 ### Pre-existing defect found: the Jaccard prefilter cannot see inside long documents
 
+**Status: fixed 2026-09-23 by `_local_coverage`; see "Fix applied" at the end of
+this section.** The report below is kept as found, including the `sim 0.0` verdict,
+which was that extraction's — today the same fact reaches the rule at 0.75 → 0.989.
+
 `paper-02` dropped `model="Transformer"` whose quote is
 `"proposed a new simple network architecture, the Transformer, based solely on
 attention mechanisms"` — the document says "We **propose** a new simple network
@@ -978,16 +984,68 @@ Short foreign values score 0.000 the same way. In other words, for a large docum
 span **neither** similarity measure can express "this quote occurs here" — only exact
 containment can, and one inflected word defeats it.
 
-Fix condition (NOT applied — trust-critical module, needs its own gated change): the
-match has to be scale-local, i.e. a best-matching-substring / local-alignment test
-(the `difflib` `get_matching_blocks` or a Smith–Waterman-style scan over the span)
-that asks "what is the closest run of this span to the quote" instead of comparing
-the whole span. Any such change must be re-measured with `scripts/audit_rescue.py`
-before and after, because loosening document matching is precisely the surface where
-`Research` and `Difficult` authenticated themselves off arXiv licence boilerplate;
-and per AGENTS.md §9 it needs an eval run on both sides. Until then this stays a
-documented ceiling on paper/article fact recall, alongside the accepted edu-05
-model-capability ceiling.
+**Fix applied — `app/knowledge/evidence.py:_local_coverage`.** The match is made
+scale-local, as above: for a document span only (`containment_must_be_local`) and
+a quote only at `MIN_STRONG_QUOTE_CHARS` or longer, `_sim` returns the fraction of
+the *quote* the span explains via `get_matching_blocks()` runs of ≥5 chars, divided
+by `len(quote)` — never by the span's length. The Jaccard prefilter is bypassed on
+that branch because it is the prefilter that made the class unrecoverable. `autojunk`
+is switched off: difflib's popular-element heuristic fires on a span this long and
+discards genuine matches (measured on one pair: `ratio()` 0.0048 with the default,
+0.0667 with `autojunk=False` — both hopeless, but the run enumeration depends on
+it). Transcript, OCR and caption spans are untouched (different code path, different
+tuning).
+
+The two gates are what keep it honest, and both are tested:
+
+- **Length floor.** Below `MIN_STRONG_QUOTE_CHARS` a short probe is satisfied
+  incidentally by any large span — which is exactly the accident the containment
+  budget was added to reject. `find_evidence("research","research",<that same
+  2,857-char page>)` still returns **0.0**, even though `_local_coverage` on that
+  pair is 1.000. Matching runs shorter than `MIN_LOCAL_RUN = 5` chars are dropped
+  for the same reason: they are shared letters, not shared text.
+- **Document-only.** `_sim(..., False)` is byte-identical to `_ratio`, asserted
+  directly, so the 0.45 hallucination threshold's behaviour on speech/OCR is
+  unchanged.
+
+Measured on both sides, per AGENTS.md §9. **Matcher level, deterministic** — probes
+run against the real paper-02 page-1 span (2,857 raw / 2,810 normalized chars),
+HEAD matcher loaded from git vs the working tree:
+
+| Check | HEAD | working tree |
+|---|---|---|
+| 98-char doc quote, one word inflected, not exactly present anywhere | `_ratio` **0.000** (Jaccard 0.0574 → prefiltered at 0.20) | `_local_coverage` **0.9898** → `find_evidence` **0.99**, kept, `page=1` |
+| `'Research'` — the arXiv-boilerplate false-accept bait | `find_evidence` 0.000 | **0.000** (`_local_coverage` alone would be 1.000; the 60-char floor rejects it) |
+| `'Difficult'` — same class | 0.000 | **0.000** |
+| two-word and mid-length value containment in a page (weak-support cap) | 0.75 | **0.75**, asserted by `test_two_word_value_inside_a_page_is_weak_never_strong` and `test_a_mid_length_phrase_in_a_page_is_capped` |
+| transcript / OCR / caption path | `_ratio` | **byte-identical**, asserted by `test_transcript_spans_keep_their_tuned_fuzzy_behavior` |
+| suite | 350 | **354 passed, 3 skipped** |
+
+**Row level** — `scripts/replay_matcher_rules.py --against HEAD`, one extraction
+(94 raw facts over 20 rows) scored under both matchers: total kept **65 → 65, 0
+facts lost, 0 count flips**, widest span 2,810. The rule fires once and it fires
+exactly as designed: paper-02 `topic='Transformer model'` goes **0.75 → 0.989**,
+weak support becomes strong support, so the confidence tier rises without the row
+count moving. The three paper facts that stay at 0.000 stay for unrelated reasons
+the rule must not touch — a 28-char quote under the floor, and values like
+`'High'` whose claim terms appear in no span.
+
+**Whether a row's *count* moves depends on the extraction, not on the rule.** This
+run's paper-01 quotes came back byte-verbatim, so containment already scored them
+1.0 and the rule had nothing to recover. Re-running that same cached extraction with
+one word of a verbatim quote altered (autoregressive → auto-regressive) moves it
+**0.75 → 0.986**, and pairing such a quote with a value the page does not contain
+gives the 0.000 → 0.99 case in the table. So the honest reading is: on today's
+library this change upgrades the *strength* of document evidence rather than the
+*number* of facts, and the count effect will only be visible on the next fresh
+extraction. That is the model-variance caveat recorded above, and it is why the
+deterministic table — not the row count — is the evidence here.
+
+`scripts/audit_rescue.py` re-run over the live library (30 reels, 73 extracted
+values): document spans admit **0 foreign** values and **1 own** value. The
+false-accept door that audit exists to watch did not widen — the new branch keys on
+`len(quote) >= MIN_STRONG_QUOTE_CHARS`, and those probes are values.
+
 
 ### Also corrected this session
 
