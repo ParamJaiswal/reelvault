@@ -1093,6 +1093,14 @@ values): document spans admit **0 foreign** values and **1 own** value. The
 false-accept door that audit exists to watch did not widen — the new branch keys on
 `len(quote) >= MIN_STRONG_QUOTE_CHARS`, and those probes are values.
 
+**Effect on the owner's actual library: none, and that is the point.** Every one of
+the 15 facts stored on the 5 document-bearing reels was replayed through `ee9be18`
+and the shipped matcher against its own reel's spans: **0 scores changed, 0 kept,
+0 dropped.** The stored quotes are byte-verbatim, so they reach the containment path
+and never enter the branch. What the change buys is headroom for the next ingest —
+a paper or article quote that differs from the source by a word ending or a hyphen
+will no longer be silently discarded.
+
 
 ### Also corrected this session
 

@@ -1522,6 +1522,10 @@ Verification:
   should score still do: paper-01 1.0 ×3, paper-02 0.979, article-01 1.0.
 - `scripts/audit_rescue.py` on the live library (30 reels, 73 values): document
   spans admit **0 foreign / 1 own** value — the false-accept door did not widen.
+- All 15 facts stored on the 5 document-bearing reels were replayed through `ee9be18`
+  and the shipped matcher against their own spans: **0 scores changed, 0 newly kept,
+  0 newly dropped.** The owner's library is untouched; the branch only changes what
+  a *future* near-verbatim document quote can certify.
 - Cost measured, not assumed: `find_evidence` 3.7 ms/fact on the real 2-page paper,
   12.0 ms/fact against one 66k-char span.
 - Suite: **358 passed, 3 skipped**.
