@@ -995,20 +995,29 @@ switched off: difflib's popular-element heuristic fires on a span this long and
 discards genuine matches (measured on one pair: `ratio()` 0.0048 with the default,
 0.0667 with `autojunk=False` — both hopeless, but the run enumeration depends on
 it). `max(_ratio, …)` because a document chunk about the size of the quote is
-exactly what `ratio()` measures well; on such a chunk coverage alone scored
-0.8068 where ratio gave 0.9133. Transcript, OCR and caption spans are untouched
-(different code path, different tuning).
+exactly what `ratio()` measures well; on such a chunk (a 119-char sentence with two
+words substituted) coverage alone scored 0.7282 where ratio gave 0.9384. Transcript,
+OCR and caption spans are untouched (different code path, different tuning).
 
-**Contiguity is the part that makes this safe.** The first version summed every
-matching block, and review caught it: a probe stitched from two disjoint regions of
-the same page is contiguous nowhere, yet scored **0.9919**, indistinguishable from
-a real quote (HEAD: 0.066, dropped). Blocks are ordered along the probe, so
-`m.b - m.a` says where each one sits in the span; a run continues while that offset
-drifts by at most `MAX_LOCAL_DRIFT = 16` (one edited word moves it by a few chars)
-and restarts otherwise. The same stitched probe now scores **0.636** — partial
-support, reported as such, never as verbatim.
+**Contiguity is the part that makes this safe, and it took two review rounds to
+get.** The first version summed every matching block: a probe stitched from two
+disjoint regions of one page scored **0.9919**, indistinguishable from a real quote
+(pre-fix: 0.066, dropped). Chaining blocks on one diagonal fixed the stitch but made
+*elisions free* — dropping a source word keeps the probe contiguous, so an
+otherwise-verbatim 119-char quote with one word removed scored a perfect **1.0**,
+which is exactly how a quote that quietly deletes a negation would be certified as
+exact. Both are now handled by the same quantity: between consecutive blocks the
+probe advances `p_gap` and the span advances `s_gap`, and the diagonal moves by
+exactly `s_gap - p_gap`. A same-length typo (propose → proposed) moves it by 0–1; an
+elision moves it by the skipped text's full length. So a run continues only within
+`MAX_LOCAL_DRIFT = 2`, and the drift it did take is subtracted from its score.
+Measured: stitch **0.636**, one-word elision **0.79**, both true quotes **0.99 /
+0.98**, fabricated 101-char quote **0.049**. Partial support is still kept — the
+0.45 gate is doing its job — but nothing short of exact containment reads as
+verbatim any more.
 
-The two gates are what keep it honest, and both are tested:
+Three limits keep it honest. The first two are tested; the third is swept, not
+pinned:
 
 - **Length floor.** Below `MIN_STRONG_QUOTE_CHARS` a short probe is satisfied
   incidentally by any large span — which is exactly the accident the containment
@@ -1018,10 +1027,10 @@ The two gates are what keep it honest, and both are tested:
 - **Document-only.** `_sim(..., False)` is byte-identical to `_ratio`, asserted
   directly, so the 0.45 hallucination threshold's behaviour on speech/OCR is
   unchanged.
-- **Run floor.** `MIN_LOCAL_RUN = 5` drops matches shorter than a word. It is a
-  noise filter, not a tuned threshold: sweeping it 3→8 leaves both true probes at
-  0.9919 / 0.9898 unchanged and moves the fabricated probe 0.089→0.059→0.000, so
-  every value in that range clears the gate by ~8×. 5 is "not a letter fragment".
+- **Run floor.** `MIN_LOCAL_RUN = 5` ignores matches shorter than a word. Sweeping
+  it 3→6 leaves both true probes fixed at 0.9919 while the fabricated probe moves
+  0.059 → 0.079 → 0.049 → 0.000, i.e. it is a noise filter with an ~9× margin to
+  the gate, not a tuned threshold. 5 means "not a letter fragment".
 
 Measured on both sides, per AGENTS.md §9. **Matcher level, deterministic** — probes
 run against the real paper-02 page-1 span (2,857 raw / 2,810 normalized chars),
@@ -1029,32 +1038,34 @@ HEAD matcher loaded from git vs the working tree:
 
 | Check | HEAD | working tree |
 |---|---|---|
-| 98-char doc quote, one word inflected, not exactly present anywhere | `_ratio` **0.000** (Jaccard 0.0574 → prefiltered at 0.20) | `_local_coverage` **0.9898** → `find_evidence` **0.99**, kept, `page=1` |
+| 98-char doc quote, one word inflected, not exactly present anywhere | `_ratio` **0.000** (Jaccard 0.0574 → prefiltered at 0.20) | `_local_coverage` **0.9796** → `find_evidence` **0.98**, kept, `page=1` |
 | `'Research'` — the arXiv-boilerplate false-accept bait | `find_evidence` 0.000 | **0.000** (`_local_coverage` alone would be 1.000; the 60-char floor rejects it) |
 | `'Difficult'` — same class | 0.000 | **0.000** |
-| quote stitched from two disjoint page regions | 0.066 (dropped) | **0.9919** with an unbounded block sum — rejected in review — **0.636** as shipped: `test_a_quote_stitched_from_disjoint_page_regions_is_not_verbatim` |
-| 105-char quote absent from the page | 0.000 | **0.059**, `test_a_long_quote_absent_from_the_page_stays_rejected` |
+| quote stitched from two disjoint page regions | 0.066 (dropped) | **0.9919** with an unbounded block sum, **1.0** with gap-free chaining — both rejected in review — **0.636** as shipped: `test_a_quote_stitched_from_disjoint_page_regions_is_not_verbatim` |
+| verbatim quote with one source word removed (the negation shape) | 0.000 (dropped) | **1.0** under gap-free chaining — rejected in review — **0.79** as shipped: `test_a_quote_that_skips_source_text_is_not_verbatim` |
+| 101-normalized-char quote absent from the page | 0.000 | **0.049**, `test_a_long_quote_absent_from_the_page_stays_rejected` |
 | two-word and mid-length value containment in a page (weak-support cap) | 0.75 | **0.75**, asserted by `test_two_word_value_inside_a_page_is_weak_never_strong` and `test_a_mid_length_phrase_in_a_page_is_capped` |
 | transcript / OCR / caption path | `_ratio` | **byte-identical**, asserted by `test_transcript_spans_keep_their_tuned_fuzzy_behavior` |
-| suite | 350 | **356 passed, 3 skipped** |
+| suite | 350 | **357 passed, 3 skipped** |
 | cost, `find_evidence` per fact | — | **3.4 ms** on the real 2-page paper; **12.2 ms** against a single 66k-char span (`autojunk=False` removes difflib's popular-element shortcut). ~100 facts on one body is 1.2 s, which is not a hot path here |
 
 **Row level** — `scripts/replay_matcher_rules.py --against d60b631^` (the commit
 before this rule existed), one extraction
 (94 raw facts over 20 rows) scored under both matchers: total kept **65 → 65, 0
 facts lost, 0 count flips**, widest span 2,810. The rule fires once and it fires
-exactly as designed: paper-02 `topic='Transformer model'` goes **0.75 → 0.989**,
+exactly as designed: paper-02 `topic='Transformer model'` goes **0.75 → 0.98**,
 weak support becomes strong support, so the confidence tier rises without the row
 count moving. The three paper facts that stay at 0.000 stay for unrelated reasons
 the rule must not touch — a 28-char quote under the floor, and values like
-`'High'` whose claim terms appear in no span.
+`'High'` whose claim terms appear in no span. Run again against `ee9be18`, before
+the branch existed at all: **65 → 65** as well.
 
 **Whether a row's *count* moves depends on the extraction, not on the rule.** This
 run's paper-01 quotes came back byte-verbatim, so containment already scored them
 1.0 and the rule had nothing to recover. Re-running that same cached extraction with
 one word of a verbatim quote altered (autoregressive → auto-regressive) moves it
-**0.75 → 0.989**, and pairing such a quote with a value the page does not contain
-gives the 0.000 → 0.99 case in the table. So the honest reading is: on today's
+**0.75 → 0.979**, and pairing such a quote with a value the page does not contain
+gives the 0.000 → 0.98 case in the table. So the honest reading is: on today's
 library this change upgrades the *strength* of document evidence rather than the
 *number* of facts, and the count effect will only be visible on the next fresh
 extraction. That is the model-variance caveat recorded above, and it is why the

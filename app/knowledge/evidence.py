@@ -163,23 +163,26 @@ def _ratio(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
-MIN_LOCAL_RUN = 5    # chars; shorter "matches" are shared letters, not shared text
-MAX_LOCAL_DRIFT = 16  # chars the probe/span offset may move inside one quote
+MIN_LOCAL_RUN = 5   # chars; shorter "matches" are shared letters, not shared text
+# What one quote may skip in the SOURCE and still count as verbatim. Between two
+# difflib blocks the probe advances by `p_gap` and the span by `s_gap`, and
+# `abs((m.b - m.a) - prev_d) == abs(s_gap - p_gap)`: a same-length substitution
+# (propose -> proposed) scores 0-1, while dropping a source word scores its full
+# length. So this tolerance separates typos from elisions, and 2 is "a typo".
+MAX_LOCAL_DRIFT = 2
 
 
 def _local_coverage(probe: str, hay: str) -> float:
-    """Fraction of the PROBE covered by one locally contiguous run of matches.
+    """Fraction of the PROBE carried by one locally contiguous run of matches.
 
     A quote is evidence only if the source says *this, in this order*. difflib
     returns matching blocks ordered along the probe, so `m.b - m.a` is where each
-    block sits in the span: blocks sharing an offset are one contiguous run, and
-    an offset jump means the probe was stitched from disjoint regions of the
-    page. Summing every block instead scores such a stitch as verbatim. Real
-    edits move the offset a little, which is what MAX_LOCAL_DRIFT allows.
-    `autojunk=False` because difflib's popular-element heuristic fires on a span
-    this long and discards genuine matches. Measured in docs/EVAL.md."""
-    if not probe or not hay:
-        return 0.0
+    block sits in the span: blocks on one diagonal are one contiguous run, and a
+    jump means the quote was stitched from, or skipped, parts of the page. Summing
+    every block instead scores such a quote as verbatim. `autojunk=False` because
+    difflib's popular-element heuristic fires on a span this long and discards
+    genuine matches. Measured in docs/EVAL.md.
+    """
     best = run = 0
     prev_d: int | None = None
     for m in SequenceMatcher(None, probe, hay,
@@ -188,7 +191,7 @@ def _local_coverage(probe: str, hay: str) -> float:
             continue
         d = m.b - m.a          # m.a indexes the probe, m.b the span
         if prev_d is not None and abs(d - prev_d) <= MAX_LOCAL_DRIFT:
-            run += m.size
+            run += m.size - abs(d - prev_d)   # elisions are never free
         else:
             run = m.size
         prev_d = d

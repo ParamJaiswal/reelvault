@@ -19,7 +19,7 @@ from app.knowledge.evidence import (CONTAINMENT_SPAN_CHARS_PER_MATCHED,
                                     CONTAINMENT_SPAN_CHARS_SLACK,
                                     MIN_QUOTE_CHARS, MIN_STRONG_QUOTE_CHARS,
                                     SourceSpan, _containment_is_local,
-                                    find_evidence, norm)
+                                    _ratio, _sim, find_evidence, norm)
 from app.pipeline.stages import build_spans
 
 # One PDF page as the paper adapter emits it: a `p.N` marker paragraph, ~2400
@@ -183,7 +183,6 @@ def test_local_coverage_is_not_applied_below_a_long_quote():
     """Below MIN_STRONG_QUOTE_CHARS a probe is satisfied incidentally by any
     large span, so it keeps the old verdict — asserted on `_sim` directly, because
     `find_evidence` caps a contained probe at 0.75 before scoring ever sees it."""
-    from app.knowledge.evidence import _ratio, _sim
     probe = norm(_VERBATIM[:MIN_STRONG_QUOTE_CHARS - 20]) + " zzz absent"
     assert MIN_QUOTE_CHARS <= len(probe) < MIN_STRONG_QUOTE_CHARS
     assert probe not in norm(_PAGE)
@@ -195,7 +194,6 @@ def test_a_quote_stitched_from_disjoint_page_regions_is_not_verbatim():
     made of the licence sentence followed by the body sentence is contiguous
     nowhere, and an unbounded sum scored it 0.99 — indistinguishable from a real
     quote. Partial support is the honest verdict; strong is not."""
-    from app.knowledge.evidence import _sim
     stitch = norm("Provided proper attribution is provided the transformer model "
                   "blocks scale quadratically with sequence lengths")
     page = norm(_PAGE)
@@ -213,14 +211,29 @@ def test_a_long_quote_absent_from_the_page_stays_rejected():
     fake = ("the quarterly revenue guidance for fiscal year twenty twenty-six "
             "exceeded analyst consensus by twelve percent")
     assert len(norm(fake)) >= MIN_STRONG_QUOTE_CHARS
+    assert _sim(norm(fake), norm(_PAGE), True) < 0.06        # docs/EVAL.md
     ev = find_evidence(fake, "revenue guidance", _doc(_PAGE))
     assert ev.similarity < HALLUCINATION_THRESHOLD and ev.span is None
+
+
+def test_a_quote_that_skips_source_text_is_not_verbatim():
+    """Chaining blocks on one diagonal made elisions free: dropping one word from
+    an otherwise verbatim 122-char run scored a perfect 1.0, which is how a quote
+    that quietly drops a negation would have been certified as exact. Only a
+    same-length substitution may continue a run."""
+    run = ("attention mechanisms and research on encoding schemes: the "
+           "transformer model blocks scale quadratically with sequence length")
+    elided = run.replace("research ", "")
+    assert run in _PAGE and elided not in _PAGE
+    page = norm(_PAGE)
+    assert _sim(norm(elided), page, True) < 0.9, _sim(norm(elided), page, True)
+    # and a typo still clears the strong bar: this is the case the branch exists for
+    assert _sim(norm(_QUOTE), page, True) >= 0.90
 
 
 def test_transcript_spans_keep_their_tuned_fuzzy_behavior():
     """Scoped to documents by measurement, not assumption — a transcript segment
     is short, so the global ratio is fine there and must stay byte-identical."""
-    from app.knowledge.evidence import _ratio, _sim
     seg = norm("the transformer blocks scale quadratically with sequence length")
     probe = norm("the transformer blocks scale quadratically with sequence lengths")
     assert _sim(probe, seg, False) == _ratio(probe, seg)
