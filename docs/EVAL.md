@@ -997,7 +997,7 @@ because a document chunk about the size of the quote is what `ratio()` measures
 well (119-char sentence, two words substituted: ratio 0.9384, coverage 0.7282).
 Transcript, OCR and caption spans keep `_ratio` untouched.
 
-**The branch certifies or says nothing, and that property is what three review
+**The branch certifies or says nothing, and that property is what four review
 rounds bought.** Each round found the same shape — perfect on the quote it was
 written for, accepting a quote the source never contained:
 
@@ -1010,10 +1010,16 @@ written for, accepting a quote the source never contained:
    `s_gap - p_gap`, so one quantity separates the two: a same-length typo (propose →
    proposed) moves it 0–1, an elision moves it by the skipped text. Runs continue
    within `MAX_LOCAL_DRIFT = 2` and pay their drift.
-3. Ends were still unanchored: `"not " + <123-char verbatim run>` scored **0.976**,
-   because an edit near either end costs ~11% of a long quote. So the best run must
-   start and end within `MAX_LOCAL_DRIFT` of the probe's own ends, and must carry
+3. Ends were unanchored: `"not " + <123-char verbatim run>` scored **0.976**, because
+   an edit near either end costs ~11% of a long quote. So the best run must start and
+   end within `MAX_LOCAL_DRIFT` of the probe's own ends, and carry
    `MIN_LOCAL_COVERAGE = 0.9` of it.
+4. Two survivors of that: the anchor counted *characters*, so **`"no " + run`** — a
+   two-character word — scored **0.9841** and inverted the quote's polarity; and an
+   **equal-length swap moves the diagonal by zero**, so 20 invented characters inside a
+   247-character quote scored **0.9312**. Ends are now rejected when the residue meets
+   the run across a space (a residue *inside* a word is the typo being forgiven), and
+   `MAX_LOCAL_EDIT_CHARS = 8` bounds what no drift rule can see.
 
 Anything failing those returns **0.0** from the branch and falls through to `_ratio`,
 i.e. gets exactly the verdict it had before this change existed. The branch therefore
@@ -1029,27 +1035,34 @@ Measured, all against the fixture page or the real paper-02 page 1 (2,857 raw /
 | verbatim run with one same-length typo (`scale` → `skip`) | 0.000 | **0.9672** |
 | same run with `research ` deleted (mid elision) | 0.000 | **0.000** — 1.0 at round 2 |
 | `"not "` prepended / `, not` appended to the run | 0.000 | **0.000** — 0.976 / 0.969 at round 3 |
+| `"no "` prepended (a two-character word, polarity-reversing) | 0.000 | **0.000** — 0.9841 at round 4 |
+| 20 characters swapped at equal length inside a 247-char quote | 0.000 | **0.000** — 0.9312 at round 4 |
 | quote stitched from two disjoint page regions | 0.066 | **0.000** — 0.9919 at round 1 |
 | 101-normalized-char quote absent from the page | 0.000 | **0.000** — 0.049 at round 2 |
 | `'Research'` / `'Difficult'` — the arXiv-boilerplate bait | 0.000 | **0.000** (coverage would be 1.000; the 60-char floor declines before the branch runs) |
 | two-word and mid-length value containment in a page | 0.75 | **0.75** unchanged, `test_two_word_value_inside_a_page_is_weak_never_strong`, `test_a_mid_length_phrase_in_a_page_is_capped` |
 | transcript / OCR / caption path | `_ratio` | **byte-identical**, `test_transcript_spans_keep_their_tuned_fuzzy_behavior` |
-| suite | 350 | **357 passed, 3 skipped** |
-| `find_evidence` cost per fact | — | **3.4 ms** on the real 2-page paper, **11.8 ms** on one 66k-char span |
+| suite | 350 | **358 passed, 3 skipped** |
+| `find_evidence` cost per fact | — | **3.7 ms** on the real 2-page paper, **12.0 ms** on one 66k-char span |
 
 `MIN_LOCAL_RUN = 5` (matches shorter than a word are ignored) is a noise filter, not
 a tuned threshold: sweeping it 3→6 leaves both true probes at 0.9919 while the
 absent-quote probe moves 0.059 → 0.079 → 0.049 → 0.000, ~9× below the gate.
 
-**Accepted limit, stated rather than hidden:** a *mid-quote* elision shorter than ~8%
-of the quote stays inside 0.9 and is invisible to a string measure — as is a
-same-length substitution (`scale` → `waist` scores 0.959). Neither the claim-term gate
-nor this branch reads meaning; the quote and its page are shown to the owner, which
-is the only defence the design has. Fixing that needs entailment, not matching.
+**Accepted limit, stated rather than hidden:** a substitution that changes the
+length by **at most 2 characters** still certifies, because nothing about it looks
+like an elision — measured `scale` → `size` inside a 247-character quote at
+**0.9879**. A polarity pair of that shape (`not` ↔ `now`, `gain` ↔ `loss`) passes
+identically. Differences of 3 characters or more break the diagonal and are caught
+(`research` → `study` → 0.0000, `quadratically` → `linearly` → 0.0000). No string
+measure can do better: this branch answers "is this the source's own text?", not
+"does this entail the claim?". That residual is the owner's review UI, and the quote
+plus its page locator is what it shows.
 
 Every row above is a committed test, not a notebook number:
-`test_a_quote_that_skips_source_text_is_not_verbatim` (mid elision, both edited ends,
-and the typo that must still pass),
+`test_a_quote_that_skips_source_text_is_not_verbatim` (mid elision, three edited
+ends, and the typo that must still pass),
+`test_a_swap_of_equal_length_which_moves_no_diagonal_still_costs`,
 `test_a_quote_stitched_from_disjoint_page_regions_is_not_evidence`, and
 `test_a_long_quote_absent_from_the_page_stays_rejected`.
 

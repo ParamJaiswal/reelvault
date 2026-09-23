@@ -219,17 +219,34 @@ def test_a_quote_that_skips_source_text_is_not_verbatim():
     """Chaining blocks on one diagonal made elisions free: dropping one word from
     an otherwise verbatim run scored a perfect 1.0. That is how a quote which
     quietly deletes a negation would be certified as exact, so neither a mid-quote
-    omission nor an edited edge may score."""
+    omission nor an edited edge may score — and an edge word two characters long is
+    still a whole word."""
     run = ("attention mechanisms and research on encoding schemes: the "
            "transformer model blocks scale quadratically with sequence length")
     page = norm(_PAGE)
     assert run in _PAGE
-    for broken in (run.replace("research ", ""), "not " + run, run + ", not"):
+    for broken in (run.replace("research ", ""), "not " + run, "no " + run,
+                   run + ", not"):
         assert broken not in _PAGE
         assert _local_coverage(norm(broken), page) == 0.0, broken
     # a same-length typo is not an elision, and is the case the branch exists for
     assert _local_coverage(norm(run.replace("scale", "skip")), page) >= 0.90
     assert _sim(norm(_QUOTE), page, True) >= 0.90
+
+
+def test_a_swap_of_equal_length_which_moves_no_diagonal_still_costs():
+    """`MAX_LOCAL_DRIFT` cannot see an equal-length substitution: it leaves the
+    diagonal untouched, so 20 characters of invented text inside a 247-character
+    quote used to score 0.931. The budget is on characters, not on drift."""
+    twice = ("attention mechanisms and research on encoding schemes: the "
+             "transformer model blocks scale quadratically with sequence length. "
+             "attention mechanisms and research on encoding schemes: the "
+             "transformer model blocks scale quadratically with sequence length")
+    page = norm(_PAGE)
+    assert twice in _PAGE
+    invented = twice.replace("research on encoding", "no proof of anything")
+    assert invented not in _PAGE
+    assert _local_coverage(norm(invented), page) == 0.0
 
 
 def test_transcript_spans_keep_their_tuned_fuzzy_behavior():

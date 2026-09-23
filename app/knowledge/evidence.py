@@ -165,6 +165,7 @@ def _ratio(a: str, b: str) -> float:
 
 MIN_LOCAL_RUN = 5   # chars; shorter "matches" are shared letters, not shared text
 MIN_LOCAL_COVERAGE = 0.9  # below this the span is not carrying THIS quote
+MAX_LOCAL_EDIT_CHARS = 8  # and no more than this many characters of it may differ
 # What one quote may skip in the SOURCE and still count as verbatim. Between two
 # difflib blocks the probe advances by `p_gap` and the span by `s_gap`, and
 # `abs((m.b - m.a) - prev_d) == abs(s_gap - p_gap)`: a same-length substitution
@@ -180,13 +181,15 @@ def _local_coverage(probe: str, hay: str) -> float:
 
     A quote is evidence only if the source says *this, in this order*. difflib
     returns matching blocks ordered along the probe, so `m.b - m.a` is where each
-    block sits in the span: blocks on one diagonal are one contiguous run. Summing
-    every block instead certifies a quote stitched from disjoint parts of the page;
-    chaining blocks without charging the diagonal lets a quote that simply SKIPS
-    source text pass as exact; a run that does not reach both ends of the probe
-    leaves text at an edge that the source never said. All three are measured in
-    docs/EVAL.md. `autojunk=False` because difflib's popular-element heuristic fires
-    on a span this long and discards genuine matches.
+    block sits in the span: blocks on one diagonal are one contiguous run. Every
+    other way of scoring it was caught in review and is excluded here: summing all
+    blocks certifies a quote stitched from disjoint parts of the page; chaining
+    without charging the diagonal certifies a quote that SKIPS source text; a run
+    that stops short of both probe ends certifies one with a word added at an edge;
+    and a run's character budget is what an equal-length swap cannot escape, since
+    swapping does not move the diagonal at all. `autojunk=False` because difflib's
+    popular-element heuristic fires on a span this long and discards genuine
+    matches. Measured in docs/EVAL.md.
     """
     best = run = 0
     best_start = best_end = 0
@@ -205,6 +208,15 @@ def _local_coverage(probe: str, hay: str) -> float:
         if run > best:
             best, best_start, best_end = run, start, m.a + m.size
     if best_start > MAX_LOCAL_DRIFT or len(probe) - best_end > MAX_LOCAL_DRIFT:
+        return 0.0
+    # A residue that meets the run across a space is a WHOLE word the source never
+    # said ("no " in front of an otherwise verbatim quote flips its polarity); a
+    # residue inside a word is the typo this branch exists to forgive.
+    if best_start and " " in (probe[best_start - 1], probe[best_start]):
+        return 0.0
+    if best_end < len(probe) and " " in (probe[best_end - 1], probe[best_end]):
+        return 0.0
+    if len(probe) - best > MAX_LOCAL_EDIT_CHARS:
         return 0.0
     return best / len(probe) if best >= MIN_LOCAL_COVERAGE * len(probe) else 0.0
 
