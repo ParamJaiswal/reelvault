@@ -46,6 +46,10 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
                         note="unparseable; kept as text only")
 
     dt: datetime | None = None
+    # The year as the source wrote it. The rolling-year policy below rewrites dt.year,
+    # and a rewritten year must not be what the plausibility window checks: "invoice
+    # 2000" parses to 2000, rolls to 2027, and would walk through looking legitimate.
+    parsed_year: int | None = None
     conf = 0.5
 
     # 0) ISO YYYY-MM-DD anywhere in the string — dateutil's dayfirst flips
@@ -60,6 +64,7 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
         except ValueError:
             dt = None
         else:
+            parsed_year = dt.year
             if dt < today - timedelta(days=7):   # rolled over to next year
                 try:
                     dt = dt.replace(year=today.year + 1)
@@ -76,6 +81,7 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
                 warnings.simplefilter("ignore")  # unknown-tz noise from OCR
                 dt = _du_parser.parse(raw, dayfirst=True, fuzzy=True,
                                       default=today)
+            parsed_year = dt.year
             if dt < today - timedelta(days=7):   # rolled over to next year
                 try:
                     dt = dt.replace(year=today.year + 1)
@@ -110,6 +116,17 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
     if dt is None:
         return Deadline(raw, None, None, 0.25, source,
                         note="unparseable; kept as text only")
+
+    # A year outside this window was never a deadline: §8 keeps an ambiguous date as
+    # text rather than inventing one, and a reminder must never fire on a guess. The
+    # bare *plausible* year with no month or day ("the deadline is 2029") still borrows
+    # them from today, which is a narrower exposure recorded in docs/EVAL.md rather
+    # than patched here.
+    stated_year = parsed_year if parsed_year is not None else dt.year
+    if not today.year - 1 <= stated_year <= today.year + 10:
+        return Deadline(raw, None, None, 0.25, source,
+                        note="year outside plausible window; kept as text only")
+
     note = ""
     if dt < today - timedelta(days=30):
         note = "date far in past; likely wrong year guess"

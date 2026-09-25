@@ -12,7 +12,7 @@ from datetime import datetime
 
 import pytest
 
-from app.knowledge.deadlines import parse_deadline
+from app.knowledge.deadlines import best_deadline, parse_deadline
 
 TODAY = datetime(2026, 9, 9)
 
@@ -87,3 +87,56 @@ def test_empty_input_is_unparseable_and_safe():
     assert d.date is None and d.reminder_date is None
     assert d.confidence == 0.0
     assert "unparseable" in d.note
+
+
+def test_a_number_that_is_not_a_year_never_becomes_a_deadline():
+    """Regression, measured on the owner's own library: reel 29's OCR reads
+    `INVOICE 4500 DUE 15 SEPTEMBER`. dateutil runs `fuzzy=True`, so it took the
+    amount as the year and returned 4500-09-15 at confidence 0.85 — which
+    `best_deadline` would have stored and handed the reminder scanner
+    4500-09-10. A hint word is what puts a sentence in front of the parser at
+    all, so the parse must refuse on its own, not rely on the scanner."""
+    line = "Deadline for the payment: invoice 4500 due 15 September"
+    d = parse_deadline(line, today=TODAY)
+    assert d.date is None and d.reminder_date is None
+    assert "outside plausible window" in d.note
+    assert best_deadline([], line, today=TODAY) is None
+
+
+def test_an_amount_below_this_year_is_not_promoted_into_a_deadline():
+    """The harder half of the same bug. The rolling-year policy rewrites a past
+    date into next year, so a window that looked at the *rewritten* year let
+    "invoice 2000" through as 2027-09-15 at confidence 0.85 — and unlike 4500 that
+    reminder is reachable, so it would have fired. The window is checked against
+    the year the source actually stated."""
+    line = "Deadline for the payment: invoice 2000 due 15 September"
+    d = parse_deadline(line, today=TODAY)
+    assert d.date is None and d.reminder_date is None
+    assert "outside plausible window" in d.note
+    assert best_deadline([], line, today=TODAY) is None
+
+
+@pytest.mark.xfail(reason="known, recorded in docs/EVAL.md: a bare in-window year "
+                          "with no month or day still borrows them from today — "
+                          "parse_deadline('the deadline is 2029') returns "
+                          "2029-09-09 at 0.85. Fixing it means requiring explicit "
+                          "month-or-day evidence before trusting dateutil's fuzzy "
+                          "result, which is a parse-behaviour change.",
+                   strict=False)
+def test_a_bare_year_alone_is_not_a_deadline():
+    d = parse_deadline("the deadline is 2029", today=TODAY)
+    assert d.date is None
+
+
+@pytest.mark.parametrize("text,expect_year", [
+    ("closes 2036-05-05", 2036),   # inside the window: a real far-off deadline
+    ("closes 2037-05-05", None),   # outside it: kept as text
+    ("the deadline was 2019", None),
+    ("apply by 10 January 2027", 2027),
+])
+def test_the_year_window_is_a_window_not_a_ban(text, expect_year):
+    d = parse_deadline(text, today=TODAY)
+    if expect_year:
+        assert d.date is not None and d.date.year == expect_year
+    else:
+        assert d.date is None and "outside plausible window" in d.note
