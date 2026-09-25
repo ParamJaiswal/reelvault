@@ -1685,3 +1685,87 @@ many.
 
 
 
+
+## The zero-deadline number hid a parser bug (2026-09-25)
+
+Date: 2026-09-25
+Phase: Phase 7 — deadline intelligence / fact accuracy
+
+Done:
+- Went to measure "0 of 28 reels have a deadline" instead of repeating it. Result:
+  **1 reel produces a deadline-hint sentence and it holds no date; 4 reels state a
+  date a human would accept and none carries a hint word.** The two halves never
+  meet, which is the real explanation. Provenance stated plainly: the only row with an
+  explicit due date (`INVOICE 4500 DUE 15 SEPTEMBER`) is reel 29, a synthetic
+  2,613-byte invoice PNG shared during the Android share-target test — so the library
+  genuinely has no live deadline, and the finding is about scanner vocabulary, not a
+  missed obligation.
+- **Fixed a parser that invented years out of amounts.** dateutil is called with
+  `fuzzy=True`, so any 4-digit token can become the year. Before/after run against
+  `git show HEAD:app/knowledge/deadlines.py`, `today` = 2026-09-09:
+  `"Deadline for the payment: invoice 4500 due 15 September"` → was **4500-09-15 at
+  conf 0.85**, now rejected as text; `"invoice 2000 …"` → was **2027-09-15 with a
+  reminder on 2027-09-10**, now rejected. One window guard
+  (`today.year - 1 … today.year + 10`) placed where all three parse branches converge.
+- **The first version of that guard was wrong and a review round caught it.** It
+  checked `dt.year` *after* the rolling-year rewrite, so the 4500 case was blocked
+  while the 2000 case walked through promoted to 2027 — the dangerous direction, since
+  a year-4500 reminder can never fire (`reminder_iso <= now+48h`,
+  `app/core/push.py:134-147`) but a 2027 one lands in the column and eventually does.
+  The shipped guard keeps the year **as the source stated it** (`parsed_year`, captured
+  before any rollover) and windows that.
+- Named, pinned, **not** patched: a bare plausible year with no month or day still
+  borrows them from today — `"the deadline is 2029"` → 2029-09-09 at conf 0.85,
+  reminder 2029-09-04. Closing it needs explicit month-or-day evidence before trusting
+  a `fuzzy` parse, i.e. a parse-behaviour change. Recorded as a non-strict `xfail` so
+  the suite states the §8 violation instead of agreeing with it.
+- `DEADLINE_HINTS` (`app/knowledge/deadlines.py:24-26`) has "apply by", "closes",
+  "submit before" but **not "due"**, so an invoice line never reaches the rules
+  fallback (`:202-203`). Left as an owner decision — and the entry point is broader
+  than the fallback: `best_deadline` also parses any verified fact whose **field name**
+  contains "deadline" or "due" (`:188`) with no hint gate, so only one of the two
+  directions was ever screened.
+- Measured OCR word-boundary collapse: **20 of 144 `ocr_results` rows on 9 of 28
+  reels** carry a space-free run ≥40 chars (worst 94). Not our join
+  (`app/pipeline/stages.py:344` joins boxes with a space). It does **not** break date
+  parsing (`August25,2026` parsed) — it breaks **quote containment**, so those frames
+  can only support facts fuzzily. 2 of 109 stored facts carry such a quote (fact 53
+  reel 13, fact 67 reel 17). Two options costed in `docs/EVAL.md`; a space-insensitive
+  OCR comparator is a third loosening of the trust door and was not attempted.
+- Re-scored v0.1 criterion 4 (manual correction): `user_corrected` is **0 of 109**
+  facts while `tests/test_phase5_corrections.py` covers the routes at HTTP level. Built
+  and code-verified, **undemonstrated by a human** — and a hand-written correction is
+  the only source of human labels this project will get for extraction quality.
+- `docs/EVAL.md`: new 2026-09-25 section — method, both tables, before/after numbers,
+  the two accepted limitations, and what cleanup the fix does and does not need.
+
+Verification:
+- `pytest tests/test_deadline_parsing.py -q` → **18 passed, 1 xfailed**: the
+  4500 regression (asserted through `best_deadline` as well as `parse_deadline`), the
+  promoted-year 2000 case that the first guard missed, `("the deadline was 2019", None)`
+  added to the window parametrization, and the non-strict xfail for the bare-2029 hole.
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **367 passed, 3 skipped,
+  1 xfailed**. Wall-clock deliberately not quoted: three runs of this same suite in
+  one day came in at 21.89 s, 43.82 s and 27.37 s on an unchanged tree.
+- Before/after measured by loading `git show HEAD:app/knowledge/deadlines.py` beside
+  the working tree and feeding both the same inputs, not by reading the diff.
+- **No library cleanup needed**: `deadline_iso`, `reminder_iso`, `deadline_raw` are 0
+  rows across all 28 reels, so no fabricated date was ever stored and no re-extraction
+  is implied.
+
+Durable lesson: **a feature that measures 0 on real data is a hypothesis, not a
+result.** The number had been reported three times as "your content has no deadlines";
+the deterministic path had never been run over the stored sources. One query loop
+produced a vocabulary gap, a fabricated year-4500 parse, and — via the review round —
+the promotion bug the obvious fix shipped with. A guard on a value that other code has
+already rewritten is the same mistake as a guard on the wrong field.
+
+Next:
+- Owner decision only: widen `DEADLINE_HINTS` with "due" (cost: more sentences reach a
+  parser that now has a year window), or accept that invoices and similar on-screen
+  text stay outside deadline tracking.
+- Unchanged from the previous section: the cross-segment transcript span (measure
+  live-library recovery first) and the 50-commit merge question. Nothing else is queued.
+
+Blockers: none. Unpushed: this work is in the commits that follow; `git status -sb` is
+authoritative, and nothing was pushed.

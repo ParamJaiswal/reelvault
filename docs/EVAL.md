@@ -1215,3 +1215,100 @@ written to the eval trace but not to the live schema, so counting how many libra
 rows a composite transcript span would recover needs a re-extraction of the video
 rows with tracing on, not an offline query.
 
+
+## September 25, 2026 — the zero-deadline number hid a parser bug, now fixed
+
+Phase 6 recorded "0 parseable deadlines from 21 real reels" as a suspicion. Running
+the deterministic path over the live library settled the suspicion **and** turned up a
+parser that would invent a year out of an amount. Both are measured, not reasoned.
+
+**Method.** Rebuild each reel's `unified` string the way the pipeline does
+(`app/pipeline/stages.py:383-388`, including the `[MM:SS]` / `[MM:SS] OCR:` prefixes
+that feed the sentence splitter), then run `extract_deadline_candidates` and
+`parse_deadline` over it, reel by reel. No model, no writes.
+
+| Measured | Result |
+|---|---|
+| Reels producing a deadline-hint sentence | **1 of 28** (reel 8 — no date in it) |
+| …sentences that parse to a date | 0 |
+| Reels whose text states a date a human would read as one | 4 (22, 26, 28, 29) |
+| …of those, also carrying a `DEADLINE_HINTS` word | **0** |
+
+A naive date regex is not a measurement: it matched 11 reels, and `0.7`, `27.0`,
+`86-64`, `1-8` were most of them. Reading each hit by hand leaves four — reel 22's
+`Connected on August25,2026` (an event date), reel 29's `INVOICE 4500 DUE 15
+SEPTEMBER`, and the publication years in the two paper rows — plus two decoys that are
+correctly dismissed: reels 9 and 11's `01/07`, `03/07`, `05/50` are slide counters.
+
+**The two halves never meet**, which is the honest answer to "why zero deadlines": the
+one row with an explicit due date produces no hint sentence, and the one hint sentence
+holds no date. Provenance caveat worth stating before anyone acts on it — **reel 29 is
+a synthetic 2,613-byte invoice PNG shared during the Android share-target test**, not
+owner content, so this library really does contain no live deadline. The finding is
+about the scanner's vocabulary, not about a missed real obligation.
+
+**Why the vocabulary matters more than that caveat suggests.** `DEADLINE_HINTS`
+(`app/knowledge/deadlines.py:24-26`) carries "apply by", "register by", "closes",
+"submit before" — **not "due"**, so an invoice line never becomes a candidate for the
+rules fallback (`deadlines.py:202-203`). But the fallback is only one of two entry
+points: `best_deadline` also parses any verified fact whose **field name** contains
+"deadline" or "due" (`deadlines.py:188`), with no hint gate at all. So sentences reach
+`parse_deadline` from two directions, and only one of them was being screened. Adding
+"due" to the hints is a widening decision, left to the owner.
+
+**The bug, with before/after measured by running both versions** (`git show
+HEAD:app/knowledge/deadlines.py` loaded beside the working tree, same inputs, `today`
+= 2026-09-09). dateutil is called with `fuzzy=True`, so any 4-digit token in the
+sentence can become the year — and the invoice amount was one:
+
+| Input | before | after |
+|---|---|---|
+| `"Deadline for the payment: invoice 4500 due 15 September"` | **4500-09-15**, conf 0.85 | rejected, kept as text |
+| `"Deadline for the payment: invoice 2000 due 15 September"` | **2027-09-15**, conf 0.85, reminder **2027-09-10** | rejected, kept as text |
+| `"the deadline was 2019"` | 2027 (rolled) | rejected |
+| `"closes 2036-05-05"` / `"closes 2037-05-05"` | 2036 / 2037 both accepted | 2036 accepted / 2037 rejected |
+| `"deadline: 5 Oct"`, `"apply by 2026-10-01"`, `"apply by 10 January 2027"` | unchanged | unchanged |
+
+The first row is what a window over the parsed year catches. The **second row is the
+bug the first version of the guard missed**: the rolling-year policy rewrites a past
+date into next year, so a window checking the *rewritten* year promoted an amount of
+`2000` into a legitimate-looking 2027 deadline — and that one is the dangerous shape,
+because a year-4500 reminder can never fire (the scanner only acts on
+`reminder_iso <= now+48h`, `app/core/push.py:134-147`) while a 2027 one sits in the
+column and eventually does. The fix keeps the year **as the source stated it**
+(`parsed_year`, captured before any rollover) and windows that, in one place where all
+three parse branches converge. `today.year - 1 … today.year + 10` is a window, not a
+ban — `2036` in, `2037` out, which is what the parametrized case pins.
+
+**Named, tested-against, and not patched:** a bare *plausible* year with no month or
+day still borrows them from `today` — `"the deadline is 2029"` → **2029-09-09 at
+confidence 0.85**, reminder 2029-09-04 — the same probe the `xfail` test runs. Closing that means requiring explicit
+month-or-day evidence before trusting dateutil's `fuzzy` result, which is a
+parse-behaviour change and not part of a bug fix. `tests/test_deadline_parsing.py`
+carries it as a non-strict `xfail` with this reason, so the suite states the violation
+of §8 instead of quietly agreeing with it.
+
+**OCR word-boundary collapse, measured.** Of 144 `ocr_results` rows, **20 rows on 9 of
+28 reels** carry a space-free run of ≥40 characters (worst 94):
+`Dropina transcript.Getbackwhooweswhat,bywhen.` The stage joins detection boxes with a
+space (`app/pipeline/stages.py:344`), so the collapse is inside one line as RapidOCR
+recognized it. It does **not** break date parsing (`August25,2026` parsed correctly) —
+it breaks **quote containment**: a well-spaced model quote cannot be `in` a de-spaced
+span, so those frames can only ever support facts through fuzzy scoring. 2 of 109
+stored facts carry such text as their evidence quote (fact 53 reel 13, fact 67 reel
+17). Two candidate fixes with their real cost: re-tune detection at OCR time (safe,
+unknown payoff, needs the frames re-OCR'd), or a space-insensitive comparator for OCR
+spans — a **third loosening of the trust door**, which would need the adversarial
+treatment `_local_coverage` took four rounds to survive. Not done.
+
+**Manual correction: built, tested, never used.** `user_corrected` is 0 of 109 facts,
+while `tests/test_phase5_corrections.py` covers the routes at HTTP level (summary and
+category patch, deterministic deadline correction with unparseable rejection and
+removal, manual fact insert, delete, cross-user ownership). v0.1 criterion 4 therefore
+scores as *implemented and code-verified, undemonstrated by a human* — and a
+hand-written correction is the only source of human labels this project will ever get
+for extraction quality.
+
+**Cleanup required: none.** `deadline_iso`, `reminder_iso` and `deadline_raw` are 0
+rows across all 28 reels, so no fabricated date was ever stored, and the fix needs no
+re-extraction.
