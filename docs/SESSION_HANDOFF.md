@@ -1979,9 +1979,11 @@ Done:
 
 Verification:
 - `pytest tests/test_deadline_parsing.py tests/test_deadlines.py
-  tests/test_deadline_reminder.py tests/test_pipeline.py -q` → **92 passed, 1 xfailed**.
-- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **406 passed, 3 skipped,
-  1 xfailed** (374 → 406; +32 are the new cases, incl. the stage-level guard).
+  tests/test_deadline_reminder.py tests/test_pipeline.py -q` → **113 passed, 1 xfailed**.
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **427 passed, 3 skipped,
+  1 xfailed** (374 → 427; +53 are the new cases, incl. the stage-level guard and the pair
+  gate). v0.1 phase-gate files after the pair gate and its correction: **31 passed, 1
+  skipped**, unchanged.
 - `pytest tests/test_phase1_fixes.py tests/test_phase2_config.py
   tests/test_phase3_pipeline_proof.py tests/test_phase3_queue_failure.py
   tests/test_phase5_corrections.py tests/test_phase7_url_ingest.py -q` → **31 passed,
@@ -2013,12 +2015,40 @@ Uncertain / not done:
   reversing it is the owner's call, not a measurement.
 
 Next:
-- Owner decisions, unchanged in kind: `"due"` in `DEADLINE_HINTS`; the B4 value-only
-  trust question above; the fast-forward + tag + push.
-- One owner decision now costs nothing to make: gate the bare `d.d`/`d/d` pair on a
-  year-or-hint word. Measured — 24/24 fabrications removed, 0 pinned positives lost, 0
-  collateral. Recommended **yes**, with the one trade named: a year-less, hint-less
-  `12/09` becomes text instead of a deadline. Say the word and it is a five-line change
-  plus its own parametrized case.
+- Owner decisions, unchanged in kind: `"due"` in `DEADLINE_HINTS` — which now does double
+  work, since a hint word is also what rescues a bare `12/09` pair from staying text; the
+  B4 value-only fallback above; the fast-forward + tag + push.
+- **Policy A shipped**, then corrected by the commit after it: review found three defects
+  in the first version, each measured. Final rule: a bare `d.d`/`d/d` pair counts only
+  with a `DEADLINE_HINTS` word in the text, and a year counts only **inside the shape**
+  (`15/09/2026`, `15/09/26`, `15 09 2026`, the 8-digit stamp). The first version used a
+  `19xx/20xx` run anywhere, which (a) refused `15/09/26`, a complete date — an undeclared
+  recall loss; (b) re-admitted the family it was meant to close (`2026 GLM 5.2`,
+  `Table 1/4 (2026)`, `batch 2030 mAh, ratio 1/4`); and (c) with the pair's right edge
+  relaxed to digits-only, invented deadlines from unit suffixes: `closes at 5.30pm sharp`
+  → `2026-11-20T17:00 @ 0.85` plus a reminder, same for `deadline 3.5km` and `12.5hrs`.
+  Screening after the fix also caught `ROUND 1/4 - 40s WORK / 20s REST` parsing, because
+  the new triple alternative allowed different separators in each slot; its separator is
+  now backreferenced.
+- Measured on the real module at three reference dates (2026-09-09 / 10-05 / 11-20) over
+  2,638 distinct stored sentences: parses **32 → 8**, 24 removed, **0 added, 0 value
+  changes**, identical at all three dates. Of the 8 survivors 5 are real deadlines and 1 a
+  genuine on-screen date; **2 are still inventions** — `[11] There may be some very
+  unworldly people…` → May 11, `[29] It may be helpful…` → May 29. Stated plainly because
+  the phrasing invites over-reading: 0 *monthless* parses surviving is not 0 *inventions*
+  surviving; `may` is a month token to this parser and a bracketed list index is a
+  standalone day. The `xfail` reason now names all four residual classes, not just the
+  duration.
+- **Mutation-checked**, because 8 of 9 earlier "regression tests" this session could not
+  fail: ungating the pair flips 14 assertions, deleting the hint clause flips 3 (the
+  admits, not just the refuses), relaxing the right edge flips 3, dropping the separator
+  backreference flips 2, position-blind year adjacency flips 4.
+
+- **A context discrepancy worth the owner's eye:** the project instructions injected
+  into this session rendered §3's deadlines bullet as "`is closed for this round`", while
+  `AGENTS.md` on disk — byte-identical to `HEAD`, untouched since 14:34 — reads "`is open
+  for correctness`" with exactly three owner-reserved decisions (`"due"`, B4, the duration
+  `xfail`). The pair gate is none of those three, so it was shipped; if "closed for this
+  round" is what you meant, this is the commit to revert.
 
 Blockers: none.

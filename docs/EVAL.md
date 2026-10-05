@@ -1534,9 +1534,62 @@ only qualify through the hint list. A also leaves `"3.5 august deadline"` alone 
 goes through the month-name branch, not the pair branch), so the duration `xfail` and
 this family are two separate debts.
 
-Not implemented. §8's ambiguity rule says which ambiguity to keep is a product decision,
-and AGENTS §3 reserves this module's policy to the owner; the measurement is here so the
-call is one line, not an open question.
+**A is implemented** (`5c8c88b`, then corrected by the commit after it once review found
+three defects in that first version). Final mechanism: a bare `<1-2>[/.-]<1-2>` pair is
+trusted **only** when the text also carries a `DEADLINE_HINTS` word. A year counts as
+evidence **only inside the shape** — `15/09/2026`, `15/09/26`, `12-09-26`, `15 09 2026`,
+the 8-digit stamp — because a year sitting elsewhere in the sentence proves nothing.
+
+What the review round caught, each measured against the first version:
+
+- **`15/09/26` stopped parsing.** The first version's cue was a `19xx/20xx` run anywhere,
+  so a *complete* date written with a two-digit year was refused — an undeclared recall
+  loss outside the stated ceiling. Fixed by requiring the year in the shape instead.
+- **`closes at 5.30pm sharp` became a deadline** (`2026-11-20T17:00 @ 0.85`, reminder
+  included), and `deadline 3.5km`, `deadline 12.5hrs`, `deadline 1.5x speed` too. Cause:
+  replacing the pair's right-edge `\b` with `(?!<digit>)` let a unit suffix end the match,
+  and dateutil filled the day from `today` — the exact invention the colon guards on
+  `_STATED_DAY` exist to stop, arriving through a dot instead of a colon. Fixed: the right
+  edge rejects letters. The **left** edge stays digit-only, because OCR glues a collapsed
+  label to the date after it and `LAST DATE12/09` states a real pair.
+- **A stray year re-opened the family the gate exists to close:** `2026 GLM 5.2` →
+  2027-05-20, `batch 2030 mAh, ratio 1/4` → 2030-04-01 (year invented from a battery
+  capacity), `the 2026 report shows 4.92 growth` → 2027-04-20, `Table 1/4 (2026)` →
+  2027-04-01. Papers state years constantly, so position-blindness admitted the section
+  class back. Removing it also killed four inventions that predated this work.
+- **The separated triple needed its separator repeated.** Allowing any of `/.-` in each
+  slot admitted `ROUND 1/4 - 40s WORK / 20s REST` as a date; found by screening the
+  corpus *after* the first version, which is the order a measurement should go in.
+
+Measured on the real module, not a simulation, at three reference dates (`today` =
+2026-09-09 / 2026-10-05 / 2026-11-20) over the same 2,638 distinct sentences: parses
+**32 → 8**, **24 removed, 0 added, 0 surviving parse changed its value**, and the count is
+identical at all three dates, so it does not depend on where the rolling-year policy
+happens to land today. Of the 8 survivors, 5 are real deadlines (`APPLY BY SEP 15`,
+`Apply by September 30`, `last date October 20th`, `CLOSES OCT 5`, `DEADLINE: NOV 30`),
+1 is a genuine on-screen date in a LinkedIn screenshot, and **2 are still inventions** —
+`[11] There may be some very unworldly people…` → May 11 and `[29] It may be helpful
+always to walk or run the same route…` → May 29. So "0 monthless parses survive" is not
+"0 inventions survive": the modal `may` *is* a month token to this parser, and a bracketed
+list index is a standalone day. That is the September 25 section's `may` warning made
+concrete, and it is a residual, not a regression.
+
+**Mutation-checked, because 8 of 9 earlier "regression tests" in this session turned out
+to be unable to fail.** Each mutation below is applied to the shipped source and the new
+assertions re-evaluated: ungating the pair flips 14; deleting the hint clause flips 3
+(including `last date 5.9` and `closes 12/09`, which is the half that must not silently
+stop working); relaxing the pair's right edge to digits-only flips 3; dropping the
+separator backreference flips 2; substituting position-blind year adjacency flips 4. Every
+new assertion can fail, and the two newly *admitted* paths (letter junction, in-shape
+year) have assertions of their own rather than being carried by the refusal list.
+
+Remaining residuals, all pre-existing and none of them a pair the gate can see: the
+duration/range `xfail` (both its spellings carry `deadline`, so the hint still admits
+them); a hint riding on an unrelated number (`the store closes 5.4 times a week` →
+Nov 5); `may` as above; and the spaced triple, whose third numeric component is shape
+evidence not semantic proof (`3 5 20 minutes apart` → 2027-05-03). All four need sense or
+position awareness rather than a wider regex, and the `xfail` reason now names all four
+instead of only the duration.
 
 **Not fixed, stated.** `"July13."` (row 95 — glued month+day, *no* year) still returns
 None: dateutil needs the year and the branch needs whitespace, so the collapse is
