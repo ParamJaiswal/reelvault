@@ -28,9 +28,21 @@ MONTH_ALIASES = {"sept": 9, "sep": 9, "jan": 1, "feb": 2, "mar": 3, "apr": 4,
 # those are the two fields dateutil would otherwise invent. §8 keeps an ambiguous date
 # as text.
 _MONTH_ALT = "|".join(sorted({*MONTHS, *MONTH_ALIASES}, key=lambda w: (-len(w), w)))
+# Letter-bounded month token, used by the month-name branch below. A month is a month
+# only when letters do not continue it, so `separate` supplies no `sep`.
+_MONTH_TOKEN = rf"(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])"
 _MONTH_WORD = re.compile(rf"\b(?:{_MONTH_ALT})\b", re.I)
 # `\b` is what stops "2026" from supplying the day 20; an ordinal suffix is a stated day.
 _STATED_DAY = re.compile(r"\b\d{1,2}(?:st|nd|rd|th)?\b")
+# OCR collapses word boundaries, so a real date arrives as `August25,2026` or
+# `DUE15SEPTEMBER`, where the two `\b` rules above both fail: `\b` needs a non-word
+# character, and the month's own first digit is one. This is the only relaxation, and it
+# stays a *pair* rule — month directly abutting day, either order — because widening the
+# two independent tests instead is what let `may` plus `11pm` invent May 9 at 0.85, and
+# let `August2026 … closes 5` invent August 5. A 4-digit run still supplies no day.
+_GLUED_MONTH_DAY = re.compile(
+    rf"(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])(?<!\d)\d{{1,2}}(?!\d)"
+    rf"|(?<!\d)\d{{1,2}}(?!\d)(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])", re.I)
 # These carry a day and a month together, so no month word is needed.
 _NUMERIC_DATE_SHAPE = re.compile(
     r"\b\d{1,2}\s*[/.-]\s*\d{1,2}\b"          # 15/09, 5.9, 15-09
@@ -39,7 +51,7 @@ _NUMERIC_DATE_SHAPE = re.compile(
 
 
 def _states_day_and_month(text: str) -> bool:
-    if _NUMERIC_DATE_SHAPE.search(text):
+    if _NUMERIC_DATE_SHAPE.search(text) or _GLUED_MONTH_DAY.search(text):
         return True
     return bool(_MONTH_WORD.search(text) and _STATED_DAY.search(text))
 
@@ -115,29 +127,40 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
 
     # 2) "September 15" / "15 September" / "Sept 20"
     if dt is None:
-        # The lookarounds are the point: without them "applications close September
-        # 2026" matched with day=20 taken out of the year, producing today's-era
-        # September 20 at confidence 0.75 — the same invention the numeric gate above
-        # exists to stop, arriving through the other branch.
+        # Both halves of this rule are load-bearing. The digit guards stop
+        # "applications close September 2026" from cutting 20 out of the year and
+        # using it as the day — the same invention the numeric gate exists to stop,
+        # arriving through the other branch. The closed month vocabulary stops
+        # "6 separate steps" from cutting `sep` out of `separate`, which the old
+        # `[A-Za-z]{3,9}` plus a 3-letter prefix lookup read as September 6.
         m = re.search(
-            r"(?<!\d)(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})|"
-            r"([A-Za-z]{3,9})\s+(?<!\d)(\d{1,2})(?:st|nd|rd|th)?(?!\d)", raw)
+            rf"(?<!\d)(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_TOKEN})|"
+            rf"({_MONTH_TOKEN})\s+(?<!\d)(\d{{1,2}})(?:st|nd|rd|th)?(?!\d)",
+            raw, re.I)
         month = day = None
         if m:
             if m.group(2):
                 day, mon_name = int(m.group(1)), m.group(2)
             else:
                 mon_name, day = m.group(3), int(m.group(4))
-            month = MONTHS.get(mon_name.lower()) or MONTH_ALIASES.get(
-                mon_name.lower()[:4]) or MONTH_ALIASES.get(mon_name.lower()[:3])
+            month = (MONTHS.get(mon_name.lower())
+                     or MONTH_ALIASES.get(mon_name.lower()))
         if month and 1 <= day <= 31:
-            dt = today.replace(month=month, day=day)
-            if dt < today - timedelta(days=7):   # rolled over to next year
-                try:
-                    dt = dt.replace(year=today.year + 1)
-                except ValueError:
-                    pass
-            conf = 0.75
+            try:
+                dt = today.replace(month=month, day=day)
+            except ValueError:
+                # An impossible date the text really did state — Feb 30, Apr 31, or
+                # Feb 29 in a non-leap year. It has to come back as unparseable text:
+                # `app/pipeline/stages.py:509` feeds this OCR and model output with no
+                # guard, so a raise here failed the whole extraction stage.
+                dt = None
+            else:
+                if dt < today - timedelta(days=7):   # rolled over to next year
+                    try:
+                        dt = dt.replace(year=today.year + 1)
+                    except ValueError:
+                        pass
+                conf = 0.75
 
     if dt is None:
         return Deadline(raw, None, None, 0.25, source,

@@ -146,11 +146,74 @@ def test_a_date_the_text_does_not_state_is_not_parsed():
     "deadline 31st March",       # ordinal + month name
     "expiry 20261015",           # compact stamp, common in form screenshots
     "1 October 2026",
+    "closes 3 Sep",              # bare alias, no year
+    "deadline August25,2026",    # OCR collapses word boundaries: 2 of 144 live rows
+    "deadline Sep30,2026",
+    "deadline 25august",         # ... in either order
 ])
 def test_a_stated_day_and_month_still_parses(text):
     """The gate must be a gate, not a ban: every form that does state a day and a
     month still reaches the parser."""
     assert parse_deadline(text, today=TODAY).date is not None
+
+
+@pytest.mark.parametrize("text", [
+    "6 separate steps",             # sep -> September 6
+    "3 decimal places",             # dec -> December 3
+    "5 novel ideas",                # nov -> November 5
+    "3 junior developers",          # jun -> June 3
+    "2 markdown notes",             # mar -> March 2
+    "5 augmented examples",         # aug -> August 5
+    "@kevinnaughtonjr 1.",          # live OCR, reel 8 row 40: `aug` inside `nAUGHTONJR`
+    "@kevinnaughtonjr 3.An inboxtriagebot",   # row 41, same reel
+    "12 increments", "20 minutes",  # never parsed: a bare count is not a day either
+])
+def test_a_word_that_only_starts_with_a_month_alias_is_not_a_month(text):
+    """The month-name branch matched `[A-Za-z]{3,9}` and then looked the token up by its
+    first four and first three letters, so "<digit> <word>" became a date whenever the
+    word merely *began* with an alias. Screening all 4,140 stored sentences of the live
+    library plus the golden set found two doing it, both on reel 8's OCR —
+    `@kevinnaughtonjr 1.` read as 2027-08-01 at confidence 0.75.
+
+    The shapes are bare on purpose. With a hint word in front, the old branch matched
+    that word first ("deadline 3") and its prefix lookup missed, so the same sentence
+    returned None at HEAD for the wrong reason and the test would have passed with the
+    bug still in. And 0.75 is not a harmless floor: `best_deadline` boosts a quote parse
+    to the fact's own confidence, so a misread outranks a corroborated value-only parse
+    (0.5) and is the value written to `deadline_iso` with a reminder attached."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
+@pytest.mark.parametrize("text", [
+    "you may apply before 11pm",     # `may` is a month, 11 is an hour
+    "submissions close 5pm in may",
+    "apply by 6pm before june",
+    "size 12kb in may",              # 12 counts bytes
+    "last date 20rs in july",        # 20 is money
+    "August2026 meeting, closes 5",  # the year is glued; the lone digit is unrelated
+])
+def test_a_digit_glued_to_a_letter_is_not_a_stated_day(text):
+    """Relaxing the gate's day rule from `\b` to "not a digit" so `August25` supplies 25
+    also let `11pm` and `20rs` supply a day while `may`/`june` supplied the month, and
+    dateutil filled whatever was left from `today` — "you may apply before 11pm" came
+    back 2027-05-09 at 0.85 with a reminder on text that states no date. The collapse is
+    therefore allowed only as a *pair* (`_GLUED_MONTH_DAY`), never as two hits that
+    happen to share a sentence."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
+@pytest.mark.parametrize("text", [
+    "deadline feb 30", "deadline 30 feb", "deadline 31 april", "deadline june 31",
+])
+def test_an_impossible_date_is_kept_as_text_instead_of_raising(text):
+    """`today.replace(month=2, day=30)` raises, and `app/pipeline/stages.py:509` calls
+    this with OCR and model text inside no try — one such line failed the whole
+    extraction stage. Month-first order crashed at HEAD; day-first joined it as soon as
+    the branch stopped swallowing "deadline 30" as a month name. §8's answer to a date
+    the text cannot mean is text, not an exception."""
+    d = parse_deadline(text, today=TODAY)
+    assert d.date is None and d.reminder_date is None
+    assert "unparseable" in d.note
 
 
 @pytest.mark.xfail(reason="residual, recorded in docs/EVAL.md: a duration can read as "
