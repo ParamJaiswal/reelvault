@@ -1947,16 +1947,27 @@ Done:
   marker first; a time the content states survives (`"[01:20] deadline 15 September at
   12:30"` → 15 Sep 12:30).
 - **Screened the next family and stopped, because it is a decision not a bug:**
-  `_NUMERIC_DATE_SHAPE` accepts `d.d` / `d/d` for its own sake, so **23 stored sentences**
-  with no month name anywhere parse to a confident date — `5.4 Regularization` →
-  2026-10-05, `REVERSE 03/07` → 2027-07-03, `(3.5 days).` → 2026-10-03, `GLM-5.2` →
-  2027-05-03 — mostly in the two paper rows, i.e. the v2 document path. **Reachable
-  today: 0**, none carries a hint word and the field-name fact holds no numbers. Telling a
-  section number from `last date 5.9` (a pinned positive, and project dayfirst policy) is
-  not a regex question, so it is recorded in `docs/EVAL.md` as the owner's §8 ambiguity
-  call rather than narrowed unilaterally. This is the fourth successive *latent* family in
-  this module — each measures zero on today's library and each goes live the moment the
-  library contains real deadline content.
+  `_NUMERIC_DATE_SHAPE` accepts `d.d` / `d/d` for its own sake, so **24 stored sentences**
+  with no month name anywhere parse to a confident date — 14 paper section numbers
+  (`5.4 Regularization` → 2026-10-05), versions (`GLM-5.2` → 2027-05-03), counters and
+  ratios (`REVERSE 03/07` → 2027-07-03), durations (`(3.5 days).`) and measurements
+  (`4.92 25.7` → 2027-04-25) — mostly in the two paper rows, i.e. the v2 document path.
+  **Reachable today: 0**, none carries a hint word and the field-name fact holds no
+  numbers. The first count said 23 because the screen's own month regex matched `dec`
+  inside **Decoder** — the alias-prefix bug fixed earlier in this very section; a screen
+  is only as good as the rule it screens with, so the count was redone with the module's
+  closed vocabulary.
+- **Priced that decision instead of leaving it open.** Simulated the narrow rule (a bare
+  pair counts only with a year-like token *or* a `DEADLINE_HINTS` word in the same
+  sentence; spaced triples, 8-digit stamps, the glued collapse and the month-name branch
+  all untouched): **kills 24/24 fabrications, loses 0 pinned positives, 0 collateral**.
+  The assumed cost to `last date 5.9` was wrong — it survives on its hint word, and
+  `expiry 20261015` on its own year. So the trade is recall-shaped: a bare `12/09` with no
+  year and no hint stays text. Not implemented — it interacts with the pending `"due"`
+  decision, and §8's ambiguity rule belongs to the owner, not to a session that found the
+  numbers. This is the fourth successive *latent* family in this module — each measures
+  zero on today's library and each goes live the moment the library contains real deadline
+  content.
 - **Added the stage-level guard the whole family lacked.** Five shapes (bare year, clock
   token, alias inside a word, impossible date, the `[MM:SS]` prefix) on one reel plus one
   real date, asserted through `stage_classify_extract` so the columns the scanner reads are
@@ -2003,8 +2014,11 @@ Uncertain / not done:
 
 Next:
 - Owner decisions, unchanged in kind: `"due"` in `DEADLINE_HINTS`; the B4 value-only
-  trust question above; whether the bare `d.d`/`d/d` pair form should require a year or a
-  same-sentence cue (costs a pinned positive; the 23-sentence family above is what it
-  buys back); the fast-forward + tag + push.
+  trust question above; the fast-forward + tag + push.
+- One owner decision now costs nothing to make: gate the bare `d.d`/`d/d` pair on a
+  year-or-hint word. Measured — 24/24 fabrications removed, 0 pinned positives lost, 0
+  collateral. Recommended **yes**, with the one trade named: a year-less, hint-less
+  `12/09` becomes text instead of a deadline. Say the word and it is a five-line change
+  plus its own parametrized case.
 
 Blockers: none.

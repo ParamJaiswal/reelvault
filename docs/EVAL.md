@@ -1489,7 +1489,7 @@ line marker before anything else sees it. A time the *content* states survives b
 
 Measured: 6 probes fabricated before and are text now, 0 flips across the same 4,140
 sentences and all 28 reels' real `unified` text (no stored sentence pairs a time with a
-month word, and none of the 23 findings below carries a hint word — so this is the
+month word, and none of the 24 findings below carries a hint word — so this is the
 fourth successive latent family in this module, not a fourth live bug).
 
 **Next, and it is a policy call: the numeric-pair form is a fabrication source on the
@@ -1497,28 +1497,55 @@ document rows.** `_NUMERIC_DATE_SHAPE` accepts `<1-2 digits>[/.-]<1-2 digits>` o
 because `last date 5.9` and `apply by 15.09.2026` must parse, and `01/07`-style dayfirst
 is project policy. So every decimal, ratio, version and section number also qualifies.
 Screening every stored sentence that yields a date while containing **no month name
-anywhere**: **23 of them**, and they are all content, not dates —
-`5.4 Regularization` → 2026-10-05, `6.3 English Constituency Parsing` → 2026-10-06,
-`REVERSE 03/07` → 2027-07-03, `1/4` → 2027-04-01, `(3.5 days).` → 2026-10-03,
-`GLM-5.2` → 2027-05-03, `ROUND 1/4 - 40s WORK / 20s REST` → 2027-04-01T00:00:20.
-Most sit in the two paper rows, i.e. the v2 document path. **Reachable today: 0** — none
+anywhere**: **24 of them**, and every one is content rather than a date — 14 paper
+section numbers (`5.4 Regularization` → 2026-10-05, `3.1 Encoder and Decoder Stacks` →
+2026-10-03, `6.3 English Constituency Parsing` → 2026-10-06), model versions (`GLM-5.2` →
+2027-05-03), ratios and slide counters (`REVERSE 03/07` → 2027-07-03, `1/4` → 2027-04-01),
+durations (`(3.5 days).` → 2026-10-03) and measurements (`4.92 25.7` → 2027-04-25,
+`step time was 1.0 seconds` → 2026-10-03). Most sit in the two paper rows — the v2
+document path, which is exactly where this will bite. **Reachable today: 0** — none
 carries a `DEADLINE_HINTS` word, so the rules fallback never asks about them, and the
-field-name path has one fact, with no numbers in it. Left unpatched because telling
-`5.4 Regularization` from `5.9` (a real dotted date) is not a regex question: either the
-pair form starts requiring a year or a same-sentence cue — which narrows a pinned
-positive — or the value/quote path gains a corroboration rule the rules fallback already
-has. That is §8's ambiguity decision, and it belongs to the owner, not to a session that
-found the numbers.
+field-name path has one fact with no numbers in it.
+
+Counting this family cost a lesson: the first pass said 23, using a month regex of
+`\b(?:jan|feb|...|dec)[a-z]*\b` — which matches `dec` inside **Decoder**, the very
+alias-prefix bug fixed earlier in this section. With the module's own closed month
+vocabulary the number is 24. A screen is only as good as the rule it screens with, so
+the corrected list is what the decision below is priced against.
+
+**The fork, with its cost measured.** Simulated the narrow rule — the bare
+`d.d`/`d/d` pair is trusted only when the sentence also carries a year-like token or a
+`DEADLINE_HINTS` word; the spaced `15 09 2026`, the 8-digit stamp, the glued
+`August25` and the month-name branch all untouched:
+
+| | kills the 24 | pinned positives lost | month-bearing sentences lost |
+|---|---|---|---|
+| A: pair needs a year **or** a hint word | 24/24 | **0** | 0 |
+| B: pair needs a year | 24/24 | `last date 5.9`, `deadline 15 09 26`, `expiry 20261015` | 0 |
+
+So the narrowing this section first assumed would cost a pinned positive costs nothing,
+provided the rule stays scoped to the bare pair branch: `5.9` survives under A because
+`last date` is a hint, and `expiry 20261015` survives because the compact stamp carries
+its own year. A's real price is a recall one and it is the honest part of the decision:
+a bare `12/09` with no year and no hint word in its sentence — a form screenshot, a
+spoken "the 12th of 9" transcribed as digits — stays text instead of becoming a
+deadline. And it interacts with the pending `"due"` question, since `due 12/09` would
+only qualify through the hint list. A also leaves `"3.5 august deadline"` alone (that
+goes through the month-name branch, not the pair branch), so the duration `xfail` and
+this family are two separate debts.
+
+Not implemented. §8's ambiguity rule says which ambiguity to keep is a product decision,
+and AGENTS §3 reserves this module's policy to the owner; the measurement is here so the
+call is one line, not an open question.
 
 **Not fixed, stated.** `"July13."` (row 95 — glued month+day, *no* year) still returns
 None: dateutil needs the year and the branch needs whitespace, so the collapse is
-survived only when the date keeps its year. The duration `xfail` is unchanged. Two
-pre-existing leaks measured identical before and after, so they are recorded rather
-than quietly carried forward — `"deadline 12:30 in june"` returns **2027-06-09T12:30**
-(`30` is a *minute*, so the gate is satisfied by a time token and the day comes from
-`today`), and `"3.5 august deadline"` returns **2027-08-03** (a decimal read as a
-day). Both are the same family as the duration residual and neither is this change's
-regression. And the
+survived only when the date keeps its year. The duration `xfail` is unchanged. Also
+standing, measured identical before and after every fix in this section:
+`"3.5 august deadline"` returns **2027-08-03**, a decimal read as a day through the
+month-name branch — the pair-branch rule above does not reach it, and it belongs to the
+same ambiguity decision. (The clock-token leak first recorded here — `"deadline 12:30 in
+june"` → `2027-06-09T12:30` — is defect 5 above and is fixed.) And the
 field-name direction, now screened, exposes a trust question rather than a parse bug:
 its value-only fallback parses the model's **own normalized value** at 0.5 when the
 evidence quote holds no date (B4, `7130b4c`, deliberately added so valid deadlines were
