@@ -21,6 +21,28 @@ MONTHS = {m.lower(): i for i, m in enumerate(
 MONTH_ALIASES = {"sept": 9, "sep": 9, "jan": 1, "feb": 2, "mar": 3, "apr": 4,
                  "jun": 6, "jul": 7, "aug": 8, "oct": 10, "nov": 11, "dec": 12}
 
+# dateutil is called with `fuzzy=True, default=today`, so it fills in every field the
+# text left out: a bare year came back as a real date carrying today's month and day,
+# and a bare month came back carrying today's day — both at confidence 0.85, with a
+# reminder. Trust the numeric path only when the text states a day *and* a month, since
+# those are the two fields dateutil would otherwise invent. §8 keeps an ambiguous date
+# as text.
+_MONTH_ALT = "|".join(sorted({*MONTHS, *MONTH_ALIASES}, key=lambda w: (-len(w), w)))
+_MONTH_WORD = re.compile(rf"\b(?:{_MONTH_ALT})\b", re.I)
+# `\b` is what stops "2026" from supplying the day 20; an ordinal suffix is a stated day.
+_STATED_DAY = re.compile(r"\b\d{1,2}(?:st|nd|rd|th)?\b")
+# These carry a day and a month together, so no month word is needed.
+_NUMERIC_DATE_SHAPE = re.compile(
+    r"\b\d{1,2}\s*[/.-]\s*\d{1,2}\b"          # 15/09, 5.9, 15-09
+    r"|\b\d{1,2}\s+\d{1,2}\s+\d{2,4}\b"       # 15 09 2026, 15 09 26
+    r"|(?<!\d)\d{8}(?!\d)")                   # 20261015, common in form screenshots
+
+
+def _states_day_and_month(text: str) -> bool:
+    if _NUMERIC_DATE_SHAPE.search(text):
+        return True
+    return bool(_MONTH_WORD.search(text) and _STATED_DAY.search(text))
+
 DEADLINE_HINTS = ("deadline", "last date", "apply before", "apply by",
                   "register by", "register before", "closes on", "closes",
                   "submit before")
@@ -73,7 +95,7 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
             conf = 0.85
 
     # 1) explicit numeric formats via dateutil (2026-09-15, 15/09/2026...)
-    if dt is None and _du_parser is not None:
+    if dt is None and _du_parser is not None and _states_day_and_month(raw):
         import warnings
 
         try:
@@ -93,9 +115,13 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
 
     # 2) "September 15" / "15 September" / "Sept 20"
     if dt is None:
+        # The lookarounds are the point: without them "applications close September
+        # 2026" matched with day=20 taken out of the year, producing today's-era
+        # September 20 at confidence 0.75 — the same invention the numeric gate above
+        # exists to stop, arriving through the other branch.
         m = re.search(
-            r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})|"
-            r"([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?", raw)
+            r"(?<!\d)(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})|"
+            r"([A-Za-z]{3,9})\s+(?<!\d)(\d{1,2})(?:st|nd|rd|th)?(?!\d)", raw)
         month = day = None
         if m:
             if m.group(2):

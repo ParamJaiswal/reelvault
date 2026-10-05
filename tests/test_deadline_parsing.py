@@ -116,23 +116,56 @@ def test_an_amount_below_this_year_is_not_promoted_into_a_deadline():
     assert best_deadline([], line, today=TODAY) is None
 
 
-@pytest.mark.xfail(reason="known, recorded in docs/EVAL.md: a bare in-window year "
-                          "with no month or day still borrows them from today — "
-                          "parse_deadline('the deadline is 2029') returns "
-                          "2029-09-09 at 0.85. Fixing it means requiring explicit "
-                          "month-or-day evidence before trusting dateutil's fuzzy "
-                          "result, which is a parse-behaviour change.",
-                   strict=False)
-def test_a_bare_year_alone_is_not_a_deadline():
-    d = parse_deadline("the deadline is 2029", today=TODAY)
-    assert d.date is None
+def test_a_date_the_text_does_not_state_is_not_parsed():
+    """`fuzzy=True, default=today` makes dateutil fill any field the text left out,
+    and the month-name branch had the same hole from the other side. Each of these
+    used to produce a real date at confidence 0.75-0.85 plus a reminder:
+
+      "the deadline is 2029"                    -> 2029-09-09  (today's month and day)
+      "applications close September 2026"       -> 2026-09-20  (day 20 cut out of 2026)
+      "deadline 2029 see remarks"               -> 2029-09-09  ("mar" inside "remarks")
+      "apply by 22nd"                           -> 2026-09-22  (month from today)
+
+    §8 keeps an ambiguous date as text, so a parse needs the day and the month to be
+    in the sentence, not in the defaults."""
+    for text in ("the deadline is 2029", "apply by 2030", "last date 1999",
+                 "the deadline was 2019", "applications close September 2026",
+                 "closing in October 2027", "apply by 22nd",
+                 "deadline 2029 see remarks", "the deadline is 2029, may vary",
+                 "you may apply by 2029", "2026 September"):
+        d = parse_deadline(text, today=TODAY)
+        assert d.date is None, text
+        assert d.reminder_date is None, text
+
+
+@pytest.mark.parametrize("text", [
+    "deadline: 15 09 2026",      # day and month numerically, spaces only
+    "deadline 15 09 26",         # two-digit year
+    "apply by 15.09.2026",       # dotted separator
+    "last date 5.9",
+    "deadline 31st March",       # ordinal + month name
+    "expiry 20261015",           # compact stamp, common in form screenshots
+    "1 October 2026",
+])
+def test_a_stated_day_and_month_still_parses(text):
+    """The gate must be a gate, not a ban: every form that does state a day and a
+    month still reaches the parser."""
+    assert parse_deadline(text, today=TODAY).date is not None
+
+
+@pytest.mark.xfail(reason="residual, recorded in docs/EVAL.md: a duration can read as "
+                          "the day-and-month pair the gate asks for, so "
+                          "'deadline 2029 in 1-2 days' still yields 2029-02-01. "
+                          "Distinguishing a pair from a range needs a unit-aware "
+                          "scan, not a wider regex.", strict=False)
+def test_a_duration_is_not_a_day_and_month_pair():
+    assert parse_deadline("deadline 2029 in 1-2 days", today=TODAY).date is None
 
 
 @pytest.mark.parametrize("text,expect_year", [
     ("closes 2036-05-05", 2036),   # inside the window: a real far-off deadline
     ("closes 2037-05-05", None),   # outside it: kept as text
-    ("the deadline was 2019", None),
-    ("apply by 10 January 2027", 2027),
+    ("closes 2019-05-05", None),   # lower edge, and the ISO branch, not the gate
 ])
 def test_the_year_window_is_a_window_not_a_ban(text, expect_year):
     d = parse_deadline(text, today=TODAY)
