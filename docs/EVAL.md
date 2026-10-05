@@ -1187,6 +1187,35 @@ it, the same offline classification above should say how many *live-library* fac
 would recover, because the number on the golden set is 3 and the golden set's video
 rows are the ones that already pass.
 
+**Measured 2026-09-25: the answer is zero, so the fix is not written.**
+The live library turns out to record its own drops: every extraction writes
+`dropped=[{field, value, quote, sim}]` into `processing_events`
+(`app/pipeline/stages.py:567`), so the same bucket classification can run over the
+owner's real reels with no model and no re-extraction. Taking the newest record-bearing
+event per reel (a `duration_s` row is written after it, so the latest event per reel is
+the wrong row) gives **60 drop records across 17 reels**:
+
+| Cause | live n | golden n=32 |
+|---|---:|---:|
+| Recorded by an older pipeline as a bare string — unclassifiable | 40 | — |
+| **Every quote line verbatim, across consecutive transcript segments** | **0** | 3 |
+| At least one line absent, or stitched from non-adjacent spans | 10 | 9 |
+| Refused by the claim-term prerequisite (deliberate) | 6 | 10 |
+| Emitted with no quote | 4 | 10 |
+
+Three caveats that keep this honest: the record list is capped at 10 per extraction
+(`[:10]`) and one reel (21) sits at that cap, so these are floors not totals; 40 of the
+60 records predate the structured format and cannot be classified at all; and this is my reproduction of the gate's
+line-wise containment test, not the gate itself — the same method that produced the
+golden table above.
+
+Even discounting all 40 unclassifiable records, the matcher's share of live drops is
+**0 of 20 classifiable**, against 3 of 32 on the golden set. A change whose entire
+measured benefit is three facts in one fixture row, in a module that took four review
+rounds to loosen once already, does not clear its own risk. **Closed as measured, not as
+deferred:** if a future reel ever drops a fact whose quote crosses whisper segments,
+the record is already in the database and this table can be re-run.
+
 ## September 23, 2026 — the document fix measured against the owner's own library
 
 The golden replay answers "did anything get lost". It cannot answer "what does the

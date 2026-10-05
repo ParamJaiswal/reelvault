@@ -1783,8 +1783,12 @@ Next:
 - Owner decision only: widen `DEADLINE_HINTS` with "due" (cost: more sentences reach a
   parser that now carries a year window and a day-and-month rule), or accept that
   invoices and similar on-screen text stay outside deadline tracking.
-- Unchanged from the previous section: the cross-segment transcript span (measure
-  live-library recovery first) and the 50-commit merge question. Nothing else is queued.
+- **The cross-segment transcript span is closed as measured, not deferred** — see the
+  new table in `docs/EVAL.md`: live-library drops are recorded in `processing_events`,
+  and of 20 classifiable records **zero** are the crossing-segment shape the fix would
+  rescue (3 of 32 on the golden set). Not worth loosening the Evidence Ledger a third
+  time for a fixture row.
+- Unchanged: the 50-commit merge question. Nothing else is queued.
 
 Blockers: none. Unpushed: this work is in the commits that follow; `git status -sb` is
 authoritative, and nothing was pushed.
