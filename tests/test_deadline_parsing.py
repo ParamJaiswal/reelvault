@@ -231,6 +231,41 @@ def test_a_time_written_in_the_source_is_still_a_time():
 
 
 @pytest.mark.parametrize("text", [
+    "5.4 Regularization",                      # a paper section number
+    "3.1 Encoder and Decoder Stacks",
+    "and use them with cheaper open source models like GLM 5.2",   # a model version
+    "REVERSE 03/07 ENGINEERING DOJO",          # a slide counter
+    "ROUND 1/4 - 40s WORK / 20s REST",         # a ratio
+    "(3.5 days).",                             # a duration
+    "(E) positional embedding instead of sinusoids 4.92 25.7",    # measurements
+])
+def test_a_bare_pair_is_a_date_only_when_something_says_it_is(text):
+    """`_NUMERIC_DATE_SHAPE` used to accept `<1-2 digits>[/.-]<1-2 digits>` as proof of a
+    day and a month, which is true of `5.9` and equally true of `3.5 days`, `GLM-5.2`,
+    `03/07` and every section number in the two paper rows. Screening the corpus found
+    **24 such sentences** parsed to a confident date, all of them content; a bare pair now
+    counts only when the sentence also carries a year or a `DEADLINE_HINTS` word, and the
+    spaced triple, the 8-digit stamp and the collapsed `August25` forms keep working
+    because they state a year or a month themselves.
+
+    The ceiling is deliberate and it is a recall one: `registrations 12/09` with no year
+    and no hint word stays text. §8 prefers text over a guess, so the test pins both
+    sides of that line rather than only the half that looks like progress."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
+@pytest.mark.parametrize("text", [
+    "registrations 12/09",                     # the ceiling: no year, no hint word
+    "the form shows 12/09",
+])
+def test_a_year_less_hint_less_pair_is_kept_as_text(text):
+    """Named separately from the bug above because it is not one: this is what the gate
+    gives up. If a future change makes these parse, that is a policy decision made in
+    passing, not a fix."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
+@pytest.mark.parametrize("text", [
     "deadline feb 30", "deadline 30 feb", "deadline 31 april", "deadline june 31",
 ])
 def test_an_impossible_date_is_kept_as_text_instead_of_raising(text):
