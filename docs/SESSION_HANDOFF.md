@@ -1792,3 +1792,83 @@ Next:
 
 Blockers: none. Unpushed: this work is in the commits that follow; `git status -sb` is
 authoritative, and nothing was pushed.
+
+## The v2 → main merge question, checked (2026-10-05)
+
+Date: 2026-10-05 (this session spans Sep 23 → Oct 5; the sections above are dated by
+the day their work actually ran)
+Phase: release posture / merge decision
+
+Done:
+- Checked the merge rather than performing it. **`main` is a strict ancestor of
+  `v2-hybrid-routing`: 55 commits ahead, 0 behind — a fast-forward, so no conflict is
+  possible and `origin/main` would advance by FF too.** Every other local branch and
+  both worktrees (`v2`, `phase4/5/6-agentic`, `v0-core`) report
+  `git rev-list --count HEAD..<branch> = 0`, i.e. none of them holds unmerged work, so
+  merging loses nothing that lives elsewhere.
+- **Tested the rollback question instead of reasoning about it — and it is subtler than
+  "one-way door".** `main` is schema v5, this branch is v9, and `SCHEMA_VERSION` appears
+  nowhere outside `app/db/schema.py:20`: nothing compares the DB's recorded version to
+  what the running code expects, `migrate()` only applies missing migrations. So a
+  detached `main` worktree was run against a **copy** of the live database (28 reels /
+  109 facts / versions 1–9) and every step succeeded: `migrate()` returned 5 and applied
+  nothing, `keyword_search('transformer')` returned the same rows before and after an
+  old-code `UPDATE`, the write persisted, and `facts` (109) / `reels_fts_shadow` (28)
+  stayed consistent. The schema is genuinely compatible — v6 rebuilds only the search
+  index, v7/v8 are additive, v9 rebuilds `facts` in one `BEGIN IMMEDIATE` while adding
+  `evidence_page` and widening the `evidence_source` CHECK to include `document`.
+  **The danger is the silence, not corruption:** `v0.1.0` accepts this database and then
+  cannot *process* the 6 non-video rows, because its `STAGES` is the video chain and it
+  has no `stages_for_kind` or document spans — enqueueing a paper row runs `media`
+  against something with no media. Nothing errors, so nothing warns. A runnable v0.1
+  fallback therefore needs a v0.1-era DB copy, not a `git checkout`.
+  Probe artifacts were deleted (`git worktree remove`, temp DB + home removed) and the
+  **live database was verified untouched** — no probe marker in reel 25, 28 reels,
+  109 facts, versions 1–9.
+- Confirmed both halves of AGENTS §2's "preserved by construction" rule on the actual
+  runtime, not just the code: `content_kind TEXT NOT NULL DEFAULT 'video'`,
+  `llm_backend = "llamacpp"`, and **`.env` does not set `RV_LLM_TEXT_BACKEND`**, so
+  hybrid cloud routing is off in practice as well as by default.
+- **Fixed the three AGENTS.md statements that the merge would have carried onto `main`
+  as false.** The milestone header still described "`v0.1` on `main` … `v2` branch
+  develops", naming a branch that is not the one carrying v2. The freeze list claimed
+  Android was frozen while `4ea22cb`/`bc0c16b`/`0bcf823` had already built the APK,
+  pinned its HTTP contract and verified it on an emulator. And §8's push freeze was
+  gated on "deadline extraction evaluated on real data" — a condition the 2026-09-25
+  measurement showed cannot be met, because there is no deadline content to evaluate.
+  Each freeze line was re-checked against `git rev-list main..HEAD -- <path>`: Docker,
+  `push.py`, `fetch.py`, `vendor/slm`, `auth.py`, `embedder.py` are all **0 commits** in
+  the v2 range, so those claims were true and were left alone; `hybrid_search` already
+  exists on `main`, and the only `search.py` change is a contentless-FTS correctness
+  fix. No freeze was lifted by this edit except Android, which is lifted because the
+  work is demonstrably already merged-bound.
+
+Recommendation (unexecuted, owner's call): correct these docs → fast-forward `main` to
+this branch's tip → tag the new tip (`v0.2.0`) before anyone builds Docker/Android from
+`main`, since `v0.1.0` already pins the old tip and an untagged movable head is not a
+release. `--no-ff` buys nothing here; squashing would destroy 55 commits of rationale.
+
+Verification:
+- `git merge-base --is-ancestor main HEAD` → exit 0. `git rev-list --count main..HEAD`
+  → 55; `HEAD..main` → 0. `git rev-parse origin/main` = `b8b0533` = `main`.
+- Rollback probe executed with `RV_DB_PATH` pointed at `sqlite3.backup()` of the live
+  DB: `migrate()` → 5 with nothing applied; `keyword_search` → `[28, 26]` before and
+  after; `UPDATE reels SET summary=… WHERE id=25` → persisted through the v9 triggers;
+  `facts` 109, `reels_fts_shadow` 28. Live DB re-checked afterwards: 28 reels, 109 facts,
+  no probe marker.
+- `git diff --shortstat main..HEAD -- <path>` per frozen component (numbers quoted
+  above), and `git show main:app/knowledge/search.py | grep ^def` to confirm
+  `hybrid_search` predates the branch.
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **374 passed, 3 skipped,
+  1 xfailed**. v0.1 gate files alone: `pytest tests/test_phase1_fixes.py
+  tests/test_phase2_config.py tests/test_phase3_pipeline_proof.py
+  tests/test_phase3_queue_failure.py tests/test_phase5_corrections.py
+  tests/test_phase7_url_ingest.py -q` → **31 passed, 1 skipped**.
+
+Next:
+- Owner decision: execute the fast-forward and the tag (and separately, whether to push
+  the 30 unpushed commits). Nothing in this session pushed anything.
+- `"due"` in `DEADLINE_HINTS` remains an open owner decision from the previous section.
+
+Blockers: none for the merge itself — it is mechanically a FF. The only real cost is
+the rollback asymmetry above.

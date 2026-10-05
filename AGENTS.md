@@ -1,7 +1,11 @@
 ## ReelVault — Agent Guidance
 
-**Last updated:** September 21, 2026  
-**Active milestone:** `v0.1` on `main` (tagged `v0.1.0`, frozen; bugfixes only) — `v2` branch develops multi-source ingestion (X/articles/papers/LinkedIn; see `docs/INGESTION.md`). Every v2 merge must keep the v0.1 suite green; `content_kind` defaults to `video` and `RV_LLM_BACKEND` defaults to local so v0.1 behavior is preserved by construction.
+**Last updated:** October 5, 2026  
+**Active milestone:** v2 multi-source ingestion on `v2-hybrid-routing` (55 commits ahead of `main`, 0 behind — a fast-forward). `main` is still `v0.1.0` (`b8b0533`, tagged, frozen). See `docs/INGESTION.md` for the v2 sources.
+
+The v0.1 merge rule still holds: **every v2 merge must keep the v0.1 suite green**, `content_kind` defaults to `video` and `RV_LLM_BACKEND` defaults to local, so v0.1 behaviour is preserved by construction. Both were re-verified on October 5, 2026 (374 passed / 3 skipped / 1 xfailed; the v0.1 phase-gate files alone are 31 passed / 1 skipped).
+
+**What merging v2 does to rollback — know this before you do it.** `main` is schema v5, this branch is v9, and `SCHEMA_VERSION` appears nowhere outside `app/db/schema.py`: no code compares the DB's recorded version to what the running code expects, and `migrate()` only applies missing migrations. This was **executed, not inferred** — a detached `main` worktree was run against a copy of the live database (28 reels / 109 facts / versions 1–9): `migrate()` returned 5 and applied nothing, `keyword_search` found the right rows before and after, and an old-code `UPDATE` wrote through the v9 triggers and persisted, with the shadow table left consistent. **So v0.1.0 does not choke on this schema — it quietly accepts it.** What it cannot do is *process* the non-video rows: `main`'s `STAGES` is the video chain with no `stages_for_kind`, so enqueueing a paper/article row runs `media` against something with no media, and `main` has no document spans to extract from. A rollback therefore leaves 6 rows unprocessable rather than erroring — which is worse, because nothing tells you. A runnable v0.1 fallback needs a v0.1-era database copy, not just a `git checkout`.
 
 Read this file before changing code. Then read `docs/SESSION_HANDOFF.md` for the latest verified session state.
 
@@ -106,17 +110,17 @@ Do not replace these with a simpler alternative merely to reduce code. Fix scope
 - Golden-set extraction evaluation
 - Backup restore and retention verification
 
-### Explicitly frozen until v0.1 validation
+### Explicitly frozen — each needs the owner's explicit authorization
 
-Do not delete these components. Do not add features to them unless the active session explicitly authorizes it.
+Do not delete these components. Do not add features to them unless the active session explicitly authorizes it. The v0.1 validation that originally gated this list is complete (`docs/V0_RETROSPECTIVE.md`); what follows stays frozen by decision, not by pending work. Every line was re-checked against `git rev-list main..v2-hybrid-routing -- <path>` on October 5, 2026, and the counts are the evidence for the claim.
 
-- Android build, APK release, and Android feature work
-- Docker build/debug/deployment work
-- Web Push expansion or phone push verification
-- Playwright/Instagram login-fallback expansion
-- Custom Business-SLM training, routing, or fine-tuning
-- New auth features, roles, invitations, or OAuth
-- Vector-search/embedding expansion beyond existing stable behavior
+- Android: **no longer frozen — already built and contract-tested.** `4ea22cb` (APK builds + PDF/image share end-to-end), `bc0c16b` (HTTP contract tests pinning the APK's paths + emulator verification), `0bcf823` (contract tests hardened from review). APK release and further Android *feature* work still need authorization.
+- Docker build/debug/deployment work — `Dockerfile`: 0 commits in the v2 range.
+- Web Push expansion or phone push verification — `app/core/push.py`: 0 commits. (Reminder/push stays frozen; see §8 for why the deadline measurement does not lift it.)
+- Playwright/Instagram login-fallback expansion — `app/pipeline/fetch.py`: 0 commits.
+- Custom Business-SLM training, routing, or fine-tuning — `vendor/slm`: 0 commits.
+- New auth features, roles, invitations, or OAuth — `app/core/auth.py`: 0 commits.
+- Vector-search/embedding expansion beyond existing stable behavior — `app/ai/embedder.py`: 0 commits, and `hybrid_search`/`semantic_search` already exist on `main`. The only v2 change in `app/knowledge/search.py` is a contentless-FTS correctness fix (fetch rowids, then load rows).
 - Bulk Instagram ingestion or saved-post scraping
 - Multi-user product work
 
@@ -323,7 +327,7 @@ Recommended v0.1 extraction shape:
 - The model may extract `date_text` only.
 - Deterministic application logic parses and normalizes dates.
 - Unparseable or ambiguous dates are retained as text or flagged for review; they are not silently invented.
-- Reminder/push behavior remains frozen until deadline extraction is evaluated on real data.
+- Reminder/push behavior remains frozen. Its stated condition — "until deadline extraction is evaluated on real data" — **cannot be met by more evaluation**: measured on October 5, 2026, the live library contains no deadline content at all (1 of 28 reels produces a hint sentence and it holds no date; 4 state a date and none carries a hint word; `deadline_iso` is 0 rows). See the 2026-09-25 section of `docs/EVAL.md`. Lifting this freeze is now an owner decision about intent, not a pending measurement.
 
 ### STT and OCR
 
