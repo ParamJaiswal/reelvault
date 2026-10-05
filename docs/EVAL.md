@@ -1324,7 +1324,8 @@ A review round on that gate found three more ways it leaked, all measured, all f
 
 - **`"mar"` inside `"remarks"`** — the month alternation had no word boundary, so
   `"deadline 2029 see remarks"` opened the gate and still produced 2029-09-09. The
-  alternation is now wrapped in `\b…\b`.
+  alternation is now wrapped in `\b…\b`. *(Superseded 2026-10-05: `\b` also rejected a
+  month glued to its day, which broke OCR dates — now letter lookarounds.)*
 - **The same invention through the other branch.** `"applications close September 2026"`
   still parsed — to **2026-09-20** at confidence 0.75 — because the month-name branch's
   own `(\d{1,2})` cut `20` out of `2026` and used it as the day. A leading `(?<!\d)` on
@@ -1353,6 +1354,8 @@ behaviour is fixed, and a new one marks what is genuinely still open.
 `Dropina transcript.Getbackwhooweswhat,bywhen.` The stage joins detection boxes with a
 space (`app/pipeline/stages.py:344`), so the collapse is inside one line as RapidOCR
 recognized it. It does **not** break date parsing (`August25,2026` parsed correctly) —
+*(true when written on 2026-09-25, broken ten days later by `e1cf26b`, restored by this
+section the same day — and it is a test case rather than a sentence.)*
 it breaks **quote containment**: a well-spaced model quote cannot be `in` a de-spaced
 span, so those frames can only ever support facts through fuzzy scoring. 2 of 109
 stored facts carry such text as their evidence quote (fact 53 reel 13, fact 67 reel
@@ -1372,3 +1375,130 @@ for extraction quality.
 **Cleanup required: none.** `deadline_iso`, `reminder_iso` and `deadline_raw` are 0
 rows across all 28 reels, so no fabricated date was ever stored, and the fix needs no
 re-extraction.
+
+## October 5, 2026 — the month-name branch read months out of ordinary words
+
+The September 25 section closed with an open thread: sentences reach `parse_deadline`
+from **two** directions and only one had been screened — `best_deadline` parses any
+verified fact whose *field name* contains "deadline" or "due" (`:209`) with no hint
+gate. Screening that direction turned up two defects, one in the branch itself and one
+in the gate shipped on Sep 25.
+
+**Method.** Same as before, widened: both versions of the module loaded side by side
+(`git show HEAD:app/knowledge/deadlines.py`), fed the identical inputs, outputs
+compared string-for-string. Inputs were (a) every fact on the field-name path, (b) the
+9 golden `date_text` and hint sentences, (c) **all 4,140 sentences** in the library and
+the golden set — every `transcript_segments`, `ocr_results`, `documents` and caption
+string split the way the pipeline splits it — because the quote path has no hint gate,
+so screening only hint sentences screens the wrong corpus.
+
+| Measured | Result |
+|---|---|
+| Facts on the field-name path | **1 of 109** (reel 22, `field="deadline"`) |
+| …that produce a deadline, before and after | **0** — its quote and value hold no date |
+| Live hint sentences that parse | 0 before, 0 after |
+| Golden hint sentences that parse | 6 before, 6 after — same 6 |
+| Golden `date_text` cases | all 4 parse identically |
+| Sentences flipped across the whole screen | **2**, both fabrications removed, 0 added |
+
+**Defect 1 — the branch matched any word that *starts* with a month alias.** Branch 2
+captured `[A-Za-z]{3,9}` and resolved it with `MONTHS.get(name)` falling back to
+`MONTH_ALIASES.get(name[:4])` then `name[:3]`. So `<digit> <word>` was a date whenever
+the word began with `sep/dec/jun/nov/mar/aug/apr/oct/jan/feb/jul`: "6 separate steps" →
+September 6, "3 decimal places" → December 3, "5 novel ideas" → November 5, "3 junior
+tracks" → June 3. The screen found the shape doing it **in the owner's own library**:
+reel 8's OCR row 40 reads `@kevinnaughtonjr 1.` and parsed as **2027-08-01 @ 0.75**
+(`aug` cut out of `nAUGHTONJR`), row 41 likewise to 2027-08-03. Not a harmless floor —
+`best_deadline` boosts a quote parse to the fact's own confidence (`:215`), so a 0.75
+misread becomes 0.9 and outranks a corroborated value-only parse (0.5), which makes it
+the value written to `deadline_iso` with a reminder attached. Reachability check: reel 8
+has one fact, `field="projects"`, and neither sentence carries a hint word, so this
+library stored nothing wrong — the class was latent, and the next reel with a
+`deadline` field is what would have triggered it.
+
+**Defect 2 — the September 25 gate silently broke the thing EVAL.md claimed was fine.**
+Wrapping the month alternation in `\b…\b` was written to stop `"mar"` inside
+`"remarks"`, and it also stopped `August25` — `\b` fails between `t` and `2`, because
+both are word characters. The line above this section asserts "It does **not** break
+date parsing (`August25,2026` parsed correctly)". On `HEAD` that was **false**: the row
+133 shape returned `None`, and the same `\b` in `_STATED_DAY` rejected the day glued to
+its month. Nothing caught it because the claim lived in prose, not in a test.
+
+**Fix — defect 1.** Branch 2 now matches `_MONTH_TOKEN`, the same closed `_MONTH_ALT`
+alternation the gate uses, bounded so letters may not continue it, and its prefix
+lookups are gone: `separate`, `decimal` and `naughtonjr` supply no month, while `Aug` and
+`Sep` standing alone still do.
+
+**Defect 3 — the one this section's own first version shipped with, caught in review.**
+Restoring the collapsed-OCR dates looked like a two-character change: replace `\b` with
+letter/negative-digit lookarounds and both halves of the pair accept `August25`. It is
+not, because `\b` was doing two *different* jobs. Relaxing the day rule let a digit
+glued to a **letter** supply the day, so `11pm` and `20rs` did it while `may` — already a
+month name — supplied the month, and dateutil filled the rest from `today`:
+`"you may apply before 11pm"` returned **2027-05-09 @ 0.85** with a reminder. Relaxing
+the month rule let a year glued to a month name supply the month, so an unrelated lone
+digit became the day: `"August2026 meeting, closes 5"` returned **2027-08-05 @ 0.85**.
+Both were measured against `HEAD`, not argued. So `\b` stays on both independent tests
+and the collapse is allowed only as a **pair** — `_GLUED_MONTH_DAY`, a month token
+directly abutting a 1-2 digit day in either order, which is precisely what OCR produces
+and precisely what two separate hits are not.
+
+**Defect 4 — the same review round found a crash, older than this change.** Branch 2's
+`today.replace(month=…, day=…)` had no guard, so a date the text stated but the calendar
+rejects raised `ValueError`: `"deadline feb 30"` crashed **at HEAD**, and `"deadline 30
+feb"` joined it the moment defect 1's fix stopped the branch swallowing "deadline 30" as
+a month name. `app/pipeline/stages.py:509` calls this inside no `try`, so one such OCR
+line failed the whole extraction stage. It now returns the same unparseable-text
+`Deadline` §8 prescribes.
+
+| Input | before (HEAD) | after |
+|---|---|---|
+| `"@kevinnaughtonjr 1."` (live OCR, reel 8 row 40) | **2027-08-01 @ 0.75** | text |
+| `"6 separate steps"` | **2026-09-06 @ 0.75** | text |
+| `"3 decimal places"` | **2026-12-03 @ 0.75** | text |
+| `"5 novel ideas"`, `"3 junior developers"`, `"2 markdown notes"`, `"5 augmented examples"` | 0.75 dates | text |
+| `"deadline August25,2026"` (the collapse shape) | **None** | 2027-08-25 @ 0.85 |
+| `"deadline Sep30,2026"`, `"DUE15SEPTEMBER deadline"`, `"deadline 25august"` | **None** | parse @ 0.85 |
+| `"you may apply before 11pm"`, `"size 12kb in may"`, `"August2026 meeting, closes 5"` | text | text (the pair rule is what keeps them there) |
+| `"deadline feb 30"`, `"deadline june 31"` | **`ValueError`** | text |
+| `"closes 3 Sep"`, `"last date 12 Dec"` | unchanged, parse | unchanged, parse |
+| every unstated form pinned on Sep 25 (bare year, bare day, `remarks`, `September 2026`) | text | text |
+
+**Test-shape lesson, worth keeping.** The first version of the regression list carried
+`"deadline 3 decimal places"`, `"deadline 6 separate modules"` and six more — all of
+which returned None **at HEAD too**, for an unrelated reason: with a hint word in front,
+the old branch matched `"deadline 3"` first and its prefix lookup missed. A parametrized
+list of nine "regression tests" was really one real case (`@kevinnaughtonjr 1.`) and
+eight that could not fail. The bare shapes are what bite, and they are what the file has
+now.
+
+**Not fixed, stated.** `"July13."` (row 95 — glued month+day, *no* year) still returns
+None: dateutil needs the year and the branch needs whitespace, so the collapse is
+survived only when the date keeps its year. The duration `xfail` is unchanged. Two
+pre-existing leaks measured identical before and after, so they are recorded rather
+than quietly carried forward — `"deadline 12:30 in june"` returns **2027-06-09T12:30**
+(`30` is a *minute*, so the gate is satisfied by a time token and the day comes from
+`today`), and `"3.5 august deadline"` returns **2027-08-03** (a decimal read as a
+day). Both are the same family as the duration residual and neither is this change's
+regression. And the
+field-name direction, now screened, exposes a trust question rather than a parse bug:
+its value-only fallback parses the model's **own normalized value** at 0.5 when the
+evidence quote holds no date (B4, `7130b4c`, deliberately added so valid deadlines were
+not dropped). That is the one path where model text alone can set `deadline_iso`, which
+sits against §8's "never let model output directly determine a normalized deadline
+date". Zero facts exercise it today; whether it should require the source to state the
+date is an owner decision, not a measurement.
+
+**Verification.** `pytest tests/test_deadline_parsing.py tests/test_deadlines.py
+tests/test_deadline_reminder.py -q` → **67 passed, 1 xfailed**. Full suite `pytest
+tests/ -q --ignore=tests/test_ai_eval.py` → **398 passed, 3 skipped, 1 xfailed** (374/3/1
+before this work; +24 are the new parametrized cases). The v0.1 phase-gate files alone:
+**31 passed, 1 skipped**, unchanged. The collapse claim prose failed to protect is now a
+test case, the alias class has eight invented shapes plus the two live ones, and the
+crash has its own test — a `ValueError` out of this function is a failed extraction
+stage, not a bad row.
+
+**Process note.** Defects 3 and 4 came from the review round after the first version, and
+neither showed in the tests that version shipped with: they were green while the change
+was actively worse than HEAD on `may` sentences and on impossible dates. Screen the
+adversarial shapes *before* writing the docstring that says what the fix does.

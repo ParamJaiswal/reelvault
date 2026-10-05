@@ -1788,7 +1788,8 @@ Next:
   and of 20 classifiable records **zero** are the crossing-segment shape the fix would
   rescue (3 of 32 on the golden set). Not worth loosening the Evidence Ledger a third
   time for a fixture row.
-- Unchanged: the 50-commit merge question. Nothing else is queued.
+- Unchanged: the merge question (read `git rev-list --count main..HEAD` for what it is
+  today). Nothing else is queued.
 
 Blockers: none. Unpushed: this work is in the commits that follow; `git status -sb` is
 authoritative, and nothing was pushed.
@@ -1801,8 +1802,8 @@ Phase: release posture / merge decision
 
 Done:
 - Checked the merge rather than performing it. **`main` is a strict ancestor of
-  `v2-hybrid-routing`: 55 commits ahead, 0 behind — a fast-forward, so no conflict is
-  possible and `origin/main` would advance by FF too.** Every other local branch and
+  `v2-hybrid-routing`: ahead with 0 behind as measured at `3d5db21` — a fast-forward, so
+  no conflict is possible and `origin/main` would advance by FF too.** Every other local branch and
   both worktrees (`v2`, `phase4/5/6-agentic`, `v0-core`) report
   `git rev-list --count HEAD..<branch> = 0`, i.e. none of them holds unmerged work, so
   merging loses nothing that lives elsewhere.
@@ -1846,7 +1847,8 @@ Done:
 Recommendation (unexecuted, owner's call): correct these docs → fast-forward `main` to
 this branch's tip → tag the new tip (`v0.2.0`) before anyone builds Docker/Android from
 `main`, since `v0.1.0` already pins the old tip and an untagged movable head is not a
-release. `--no-ff` buys nothing here; squashing would destroy 55 commits of rationale.
+release. `--no-ff` buys nothing here; squashing would destroy the per-commit rationale
+this file keeps referring back to.
 
 Verification:
 - `git merge-base --is-ancestor main HEAD` → exit 0. `git rev-list --count main..HEAD`
@@ -1867,8 +1869,115 @@ Verification:
 
 Next:
 - Owner decision: execute the fast-forward and the tag (and separately, whether to push
-  the 30 unpushed commits). Nothing in this session pushed anything.
+  the commits this branch is ahead of `origin/v2-hybrid-routing` by — read it with
+  `git status -sb`, because any number written here is wrong as soon as anything
+  commits). Nothing in this session pushed anything.
 - `"due"` in `DEADLINE_HINTS` remains an open owner decision from the previous section.
 
 Blockers: none for the merge itself — it is mechanically a FF. The only real cost is
 the rollback asymmetry above.
+
+## The un-screened deadline direction, screened — it found four defects (2026-10-05)
+
+Date: 2026-10-05
+Phase: Phase 7 — deadline intelligence / fact accuracy
+
+Done:
+- Closed the thread the previous two sections left open: `best_deadline` parses any
+  verified fact whose **field name** contains "deadline" or "due" (`:209`) with no hint
+  gate, so sentences reach `parse_deadline` from two directions and only one had been
+  screened. Screened both. **The field-name direction has 1 candidate of 109 facts**
+  (reel 22, `field="deadline"`), and it produces **no** deadline before or after — its
+  quote and value hold no date.
+- **Screened the wrong corpus first, then the right one.** Hint sentences number 1 live
+  and 9 golden; the quote path has no hint gate, so the real screen is every stored
+  sentence: **4,140** of them (all `transcript_segments`, `ocr_results`, `documents`,
+  captions, plus the golden set), old version vs new, outputs compared string-for-string.
+  Result: **2 flips, both a fabrication removed, 0 added**; 54 sentences parse in both;
+  the 6 golden hint dates and all 4 golden `date_text` cases are identical.
+- **Defect 1: the month-name branch read months out of ordinary words.** It captured
+  `[A-Za-z]{3,9}` and resolved it by 4-letter then 3-letter prefix, so `<digit> <word>`
+  became a date whenever the word merely began with an alias — "6 separate steps" →
+  September 6, "3 decimal places" → December 3, "5 novel ideas" → November 5. Two real
+  ones in the owner's library: reel 8 OCR rows 40/41, `@kevinnaughtonjr 1.` parsed as
+  **2027-08-01 @ 0.75** (`aug` cut out of `nAUGHTONJR`). Not a harmless floor: a quote
+  parse is boosted to the fact's own confidence (`:215`), so the misread outranks a
+  corroborated 0.5 value parse and becomes what is written to `deadline_iso` with a
+  reminder. Latent on this library (reel 8's only fact is `field="projects"`, and the
+  deadline columns are still 0 rows), one `deadline`-labelled fact away from live.
+- **Defect 2: the day-and-month gate shipped an hour earlier silently broke the OCR
+  dates `docs/EVAL.md` claims are fine.** Wrapping the month alternation in `\b…\b` also
+  rejected `August25` — `\b` fails between `t` and `2` since both are word characters —
+  and `_STATED_DAY`'s `\b` rejected the day glued to its month. `August25,2026` returned
+  None on HEAD while the Sep 25 section asserted it "parsed correctly". Nothing caught
+  it because the claim was prose, not a test.
+- **Fixed 1:** branch 2 now matches `_MONTH_TOKEN` (the gate's own closed alternation,
+  bounded so letters may not continue it) and its 4-/3-letter prefix lookups are gone.
+  `separate`, `decimal` and `naughtonjr` supply no month; `Aug` and `Sep` alone still do.
+- **Defect 3 — the one my own first version of this fix shipped with, found in review.**
+  Restoring the collapsed dates looked like swapping `` for letter/negative-digit
+  lookarounds. It is not, because `` was doing two different jobs. Relaxing the day
+  rule let a digit glued to a **letter** supply the day, so `may` plus `11pm` produced
+  **2027-05-09 @ 0.85 with a reminder**; relaxing the month rule let a year glued to a
+  month name supply the month, so `"August2026 meeting, closes 5"` produced
+  **2027-08-05 @ 0.85**. Both measured against HEAD, and both were *worse than the code
+  I started from*. `` therefore stays on both independent tests and the OCR collapse
+  is allowed only as a **pair** — `_GLUED_MONTH_DAY`, month abutting 1-2 digits in either
+  order — which restores `August25,2026` / `Sep30,2026` / `DUE15SEPTEMBER` / `25august`
+  without opening the sentence to any stray digit.
+- **Defect 4 — a crash older than this work, found by the same review round.** Branch 2's
+  `today.replace(month=…, day=…)` was unguarded, so an impossible stated date raised
+  `ValueError`: `"deadline feb 30"` **already crashed at HEAD**, and `"deadline 30 feb"`
+  joined it the moment defect 1's fix stopped the branch swallowing "deadline 30" as a
+  month name. `app/pipeline/stages.py:509` calls this with no `try` around it, so one
+  such OCR line failed the entire extraction stage. Now returns unparseable text.
+- **The first regression list was mostly fake, and review caught that too.** Nine
+  parametrized "regression tests" of the form `"deadline 3 decimal places"` passed at
+  HEAD as well, because the hint word matched first and its prefix lookup missed. Only
+  the bare shapes bite; the file now has eight of them plus the two live OCR ones, the
+  six glued-digit shapes, and the four crash shapes.
+- Recorded in `docs/EVAL.md` as a new dated section, with pointers on the two Sep-25
+  lines this supersedes rather than silently rewriting them.
+
+Verification:
+- `pytest tests/test_deadline_parsing.py tests/test_deadlines.py
+  tests/test_deadline_reminder.py -q` → **67 passed, 1 xfailed**.
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **398 passed, 3 skipped,
+  1 xfailed** (374 → 398; +24 are the new parametrized cases).
+- `pytest tests/test_phase1_fixes.py tests/test_phase2_config.py
+  tests/test_phase3_pipeline_proof.py tests/test_phase3_queue_failure.py
+  tests/test_phase5_corrections.py tests/test_phase7_url_ingest.py -q` → **31 passed,
+  1 skipped** — the v0.1 gate is untouched by a deadline-parser change.
+- Before/after by loading `git show HEAD:app/knowledge/deadlines.py` beside the working
+  tree and feeding both identical inputs — every number above came out of that, none
+  from reading the diff. Re-screened the full 4,140-sentence corpus **after** the
+  redesign, not only before it: still 2 flips, both removals, 0 added, 0 raises. The
+  pinned Sep-25 negatives all still stay text; live DB opened read-only
+  (`file:data/reelvault.db?mode=ro`) throughout.
+- `caveman:cavecrew-reviewer` on the diff (the accepted substitute for the Jev gate —
+  `jev_review` still returns `AI Gateway authentication failed`). It found defects 3 and
+  4 and the weak test list; all three were fixed and re-measured.
+
+Uncertain / not done:
+- `"July13."` (reel 16 row 95) still returns None — the pair rule opens the gate, but a
+  glued month+day **without** a year survives neither dateutil nor branch 2, which needs
+  whitespace. Fixing it means an OCR-aware split, not a wider regex.
+- Two **pre-existing** leaks, measured identical on HEAD and now, so not this change's
+  regressions: `"deadline 12:30 in june"` → `2027-06-09T12:30 @ 0.85` (a *minute*
+  satisfies `_STATED_DAY`, and the day then comes from `today`) and
+  `"3.5 august deadline"` → `2027-08-03 @ 0.85` (a decimal read as a day). Same family as
+  the accepted duration residual. Note also that a parse can carry a time component at
+  all, which reaches the `reminder_iso` arithmetic — nothing in the suite pins whether
+  that is intended.
+- The field-name direction's **value-only fallback** parses the model's own normalized
+  value at 0.5 when the quote holds no date (B4, `7130b4c`). It is the one path where
+  model text alone can set `deadline_iso`, against §8's "never let model output directly
+  determine a normalized deadline date". Zero facts exercise it. **Deliberately not
+  patched**: B4 was an intentional decision to stop dropping valid deadlines, so
+  reversing it is the owner's call, not a measurement.
+
+Next:
+- Owner decisions, unchanged in kind: `"due"` in `DEADLINE_HINTS`; the B4 value-only
+  trust question above; the fast-forward + tag + push.
+
+Blockers: none.
