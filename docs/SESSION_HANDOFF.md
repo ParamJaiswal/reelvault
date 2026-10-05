@@ -1915,13 +1915,13 @@ Done:
   bounded so letters may not continue it) and its 4-/3-letter prefix lookups are gone.
   `separate`, `decimal` and `naughtonjr` supply no month; `Aug` and `Sep` alone still do.
 - **Defect 3 — the one my own first version of this fix shipped with, found in review.**
-  Restoring the collapsed dates looked like swapping `` for letter/negative-digit
-  lookarounds. It is not, because `` was doing two different jobs. Relaxing the day
+  Restoring the collapsed dates looked like swapping `\b` for letter/negative-digit
+  lookarounds. It is not, because `\b` was doing two different jobs. Relaxing the day
   rule let a digit glued to a **letter** supply the day, so `may` plus `11pm` produced
   **2027-05-09 @ 0.85 with a reminder**; relaxing the month rule let a year glued to a
   month name supply the month, so `"August2026 meeting, closes 5"` produced
   **2027-08-05 @ 0.85**. Both measured against HEAD, and both were *worse than the code
-  I started from*. `` therefore stays on both independent tests and the OCR collapse
+  I started from*. `\b` therefore stays on both independent tests and the OCR collapse
   is allowed only as a **pair** — `_GLUED_MONTH_DAY`, month abutting 1-2 digits in either
   order — which restores `August25,2026` / `Sep30,2026` / `DUE15SEPTEMBER` / `25august`
   without opening the sentence to any stray digit.
@@ -1936,14 +1936,35 @@ Done:
   HEAD as well, because the hint word matched first and its prefix lookup missed. Only
   the bare shapes bite; the file now has eight of them plus the two live OCR ones, the
   six glued-digit shapes, and the four crash shapes.
+- **Defect 5: a clock token supplied the day, and the pipeline's own `[MM:SS]` prefix was
+  the clock.** `"deadline 12:30 in june"` → **2027-06-09T12:30 @ 0.85** — month from
+  `june`, hour from the clock, **day borrowed from `today`**, because `\b` counted `12`
+  and `30` as standalone numbers and dateutil filled what the text never stated. Since
+  `stages.py:381-382` prefixes every transcript and OCR line, the normal shape
+  `"[00:15] OCR: deadline in june"` had the same hole, and even a correct date picked up
+  the marker's minute: edu-03's saved quote stored **2026-10-05T00:15**. Now a number
+  touching a colon states minutes not a day, and the parser strips ReelVault's own line
+  marker first; a time the content states survives (`"[01:20] deadline 15 September at
+  12:30"` → 15 Sep 12:30).
+- **Screened the next family and stopped, because it is a decision not a bug:**
+  `_NUMERIC_DATE_SHAPE` accepts `d.d` / `d/d` for its own sake, so **23 stored sentences**
+  with no month name anywhere parse to a confident date — `5.4 Regularization` →
+  2026-10-05, `REVERSE 03/07` → 2027-07-03, `(3.5 days).` → 2026-10-03, `GLM-5.2` →
+  2027-05-03 — mostly in the two paper rows, i.e. the v2 document path. **Reachable
+  today: 0**, none carries a hint word and the field-name fact holds no numbers. Telling a
+  section number from `last date 5.9` (a pinned positive, and project dayfirst policy) is
+  not a regex question, so it is recorded in `docs/EVAL.md` as the owner's §8 ambiguity
+  call rather than narrowed unilaterally. This is the fourth successive *latent* family in
+  this module — each measures zero on today's library and each goes live the moment the
+  library contains real deadline content.
 - Recorded in `docs/EVAL.md` as a new dated section, with pointers on the two Sep-25
   lines this supersedes rather than silently rewriting them.
 
 Verification:
 - `pytest tests/test_deadline_parsing.py tests/test_deadlines.py
-  tests/test_deadline_reminder.py -q` → **67 passed, 1 xfailed**.
-- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **398 passed, 3 skipped,
-  1 xfailed** (374 → 398; +24 are the new parametrized cases).
+  tests/test_deadline_reminder.py tests/test_pipeline.py -q` → **91 passed, 1 xfailed**.
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **405 passed, 3 skipped,
+  1 xfailed** (374 → 405; +31 are the new parametrized cases).
 - `pytest tests/test_phase1_fixes.py tests/test_phase2_config.py
   tests/test_phase3_pipeline_proof.py tests/test_phase3_queue_failure.py
   tests/test_phase5_corrections.py tests/test_phase7_url_ingest.py -q` → **31 passed,
@@ -1962,13 +1983,11 @@ Uncertain / not done:
 - `"July13."` (reel 16 row 95) still returns None — the pair rule opens the gate, but a
   glued month+day **without** a year survives neither dateutil nor branch 2, which needs
   whitespace. Fixing it means an OCR-aware split, not a wider regex.
-- Two **pre-existing** leaks, measured identical on HEAD and now, so not this change's
-  regressions: `"deadline 12:30 in june"` → `2027-06-09T12:30 @ 0.85` (a *minute*
-  satisfies `_STATED_DAY`, and the day then comes from `today`) and
-  `"3.5 august deadline"` → `2027-08-03 @ 0.85` (a decimal read as a day). Same family as
-  the accepted duration residual. Note also that a parse can carry a time component at
-  all, which reaches the `reminder_iso` arithmetic — nothing in the suite pins whether
-  that is intended.
+- `"3.5 august deadline"` still → `2027-08-03 @ 0.85`: the clock fix closed the `:`
+  family, the `.` family is the 23-sentence policy question above. Whether `deadline_iso`
+  should ever carry a time-of-day at all is still unpinned by the suite — it now can only
+  come from source content, not from the marker, which is the narrower version of the
+  same open question.
 - The field-name direction's **value-only fallback** parses the model's own normalized
   value at 0.5 when the quote holds no date (B4, `7130b4c`). It is the one path where
   model text alone can set `deadline_iso`, against §8's "never let model output directly
@@ -1978,6 +1997,8 @@ Uncertain / not done:
 
 Next:
 - Owner decisions, unchanged in kind: `"due"` in `DEADLINE_HINTS`; the B4 value-only
-  trust question above; the fast-forward + tag + push.
+  trust question above; whether the bare `d.d`/`d/d` pair form should require a year or a
+  same-sentence cue (costs a pinned positive; the 23-sentence family above is what it
+  buys back); the fast-forward + tag + push.
 
 Blockers: none.

@@ -1472,6 +1472,44 @@ list of nine "regression tests" was really one real case (`@kevinnaughtonjr 1.`)
 eight that could not fail. The bare shapes are what bite, and they are what the file has
 now.
 
+**Defect 5 — a clock token stated the day, and ReelVault's own timestamp prefix was the
+commonest clock.** `deadline 12:30 in june` returned **2027-06-09T12:30 @ 0.85**: month
+from `june`, hour from the clock, **day from `today`** — `\b` counted `12` and `30` as
+standalone numbers, so the day-and-month gate opened and dateutil filled the field the
+text never stated. Same root cause as the bare-year case, one token earlier. Worse, every
+transcript and OCR line the pipeline hands to the parser carries `[MM:SS]` (and
+`[MM:SS] OCR:`) — `app/pipeline/stages.py:381-382` — so `"[00:15] OCR: deadline in
+june"` was not a corner case but the normal shape, and even a correctly-parsed date got
+the prefix's minute put into `deadline_iso`: edu-03's saved quote
+`"[00:15] OCR: CLOSES OCT 5"` stored **2026-10-05T00:15**, Oct 5 being right and
+`00:15` being a ReelVault printout. Fix: a number touching a colon states minutes, not a
+day (`_STATED_DAY` and both day positions in branch 2), and the parser strips our own
+line marker before anything else sees it. A time the *content* states survives both —
+`"[01:20] deadline 15 September at 12:30"` still stores 15 September 12:30.
+
+Measured: 6 probes fabricated before and are text now, 0 flips across the same 4,140
+sentences and all 28 reels' real `unified` text (no stored sentence pairs a time with a
+month word, and none of the 23 findings below carries a hint word — so this is the
+fourth successive latent family in this module, not a fourth live bug).
+
+**Next, and it is a policy call: the numeric-pair form is a fabrication source on the
+document rows.** `_NUMERIC_DATE_SHAPE` accepts `<1-2 digits>[/.-]<1-2 digits>` on its own
+because `last date 5.9` and `apply by 15.09.2026` must parse, and `01/07`-style dayfirst
+is project policy. So every decimal, ratio, version and section number also qualifies.
+Screening every stored sentence that yields a date while containing **no month name
+anywhere**: **23 of them**, and they are all content, not dates —
+`5.4 Regularization` → 2026-10-05, `6.3 English Constituency Parsing` → 2026-10-06,
+`REVERSE 03/07` → 2027-07-03, `1/4` → 2027-04-01, `(3.5 days).` → 2026-10-03,
+`GLM-5.2` → 2027-05-03, `ROUND 1/4 - 40s WORK / 20s REST` → 2027-04-01T00:00:20.
+Most sit in the two paper rows, i.e. the v2 document path. **Reachable today: 0** — none
+carries a `DEADLINE_HINTS` word, so the rules fallback never asks about them, and the
+field-name path has one fact, with no numbers in it. Left unpatched because telling
+`5.4 Regularization` from `5.9` (a real dotted date) is not a regex question: either the
+pair form starts requiring a year or a same-sentence cue — which narrows a pinned
+positive — or the value/quote path gains a corroboration rule the rules fallback already
+has. That is §8's ambiguity decision, and it belongs to the owner, not to a session that
+found the numbers.
+
 **Not fixed, stated.** `"July13."` (row 95 — glued month+day, *no* year) still returns
 None: dateutil needs the year and the branch needs whitespace, so the collapse is
 survived only when the date keeps its year. The duration `xfail` is unchanged. Two
@@ -1490,9 +1528,10 @@ date". Zero facts exercise it today; whether it should require the source to sta
 date is an owner decision, not a measurement.
 
 **Verification.** `pytest tests/test_deadline_parsing.py tests/test_deadlines.py
-tests/test_deadline_reminder.py -q` → **67 passed, 1 xfailed**. Full suite `pytest
-tests/ -q --ignore=tests/test_ai_eval.py` → **398 passed, 3 skipped, 1 xfailed** (374/3/1
-before this work; +24 are the new parametrized cases). The v0.1 phase-gate files alone:
+tests/test_deadline_reminder.py tests/test_pipeline.py -q` → **91 passed, 1 xfailed**
+(the pipeline file is the one that replays edu-03's prefixed quote through the real
+stage). Full suite `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **405 passed,
+3 skipped, 1 xfailed** (374/3/1 before this work; +31 are the new parametrized cases). The v0.1 phase-gate files alone:
 **31 passed, 1 skipped**, unchanged. The collapse claim prose failed to protect is now a
 test case, the alias class has eight invented shapes plus the two live ones, and the
 crash has its own test — a `ValueError` out of this function is a failed extraction
