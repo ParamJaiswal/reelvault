@@ -32,8 +32,13 @@ _MONTH_ALT = "|".join(sorted({*MONTHS, *MONTH_ALIASES}, key=lambda w: (-len(w), 
 # only when letters do not continue it, so `separate` supplies no `sep`.
 _MONTH_TOKEN = rf"(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])"
 _MONTH_WORD = re.compile(rf"\b(?:{_MONTH_ALT})\b", re.I)
-# `\b` is what stops "2026" from supplying the day 20; an ordinal suffix is a stated day.
-_STATED_DAY = re.compile(r"\b\d{1,2}(?:st|nd|rd|th)?\b")
+# `\b` is what stops "2026" from supplying the day 20, and it must stay a word boundary
+# rather than a digit-only guard: `20rs`, `11pm` and `August25` all adjoin a letter, and
+# only the glued pair below may read those as a day. The colon guards keep a clock token
+# out of both roles — `12:30` states minutes, not a day — which is what let
+# "deadline 12:30 in june" come back 2027-06-09T12:30, the month from `june`, the day
+# from `today`, the hour from a clock.
+_STATED_DAY = re.compile(r"(?<!:)\b\d{1,2}(?:st|nd|rd|th)?\b(?!:)")
 # OCR collapses word boundaries, so a real date arrives as `August25,2026` or
 # `DUE15SEPTEMBER`, where the two `\b` rules above both fail: `\b` needs a non-word
 # character, and the month's own first digit is one. This is the only relaxation, and it
@@ -41,8 +46,15 @@ _STATED_DAY = re.compile(r"\b\d{1,2}(?:st|nd|rd|th)?\b")
 # two independent tests instead is what let `may` plus `11pm` invent May 9 at 0.85, and
 # let `August2026 … closes 5` invent August 5. A 4-digit run still supplies no day.
 _GLUED_MONTH_DAY = re.compile(
-    rf"(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])(?<!\d)\d{{1,2}}(?!\d)"
-    rf"|(?<!\d)\d{{1,2}}(?!\d)(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])", re.I)
+    rf"(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])(?<!\d)\d{{1,2}}(?!\d)(?!:)"
+    rf"|(?<![:\d])\d{{1,2}}(?!\d)(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])", re.I)
+# `[MM:SS]` and `[MM:SS] OCR:` are what the pipeline itself writes in front of every
+# transcript and OCR line (`app/pipeline/stages.py:381-382`), so they reach this parser
+# twice over: inside a rules-fallback candidate, and inside a model quote kept verbatim
+# from a prefixed span. dateutil reads them as a clock and puts that hour on the stored
+# deadline. Only our own marker, and only at line start — a time written in the source
+# content is content and stays.
+_LINE_MARKER = re.compile(r"(?:^|\n)\[\d{1,2}:\d{2}\](?:\s*OCR:)?[ \t]*")
 # These carry a day and a month together, so no month word is needed.
 _NUMERIC_DATE_SHAPE = re.compile(
     r"\b\d{1,2}\s*[/.-]\s*\d{1,2}\b"          # 15/09, 5.9, 15-09
@@ -75,6 +87,7 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
     """Parse human deadline text into a concrete date (this year, rolling)."""
     today = today or datetime.now()
     raw = (raw or "").strip()
+    raw = _LINE_MARKER.sub(" ", raw).strip()
     if not raw or not any(ch.isdigit() for ch in raw):
         return Deadline(raw, None, None, 0.0, source,
                         note="unparseable; kept as text only")
@@ -127,15 +140,15 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
 
     # 2) "September 15" / "15 September" / "Sept 20"
     if dt is None:
-        # Both halves of this rule are load-bearing. The digit guards stop
+        # Both halves of this rule are load-bearing. The digit and colon guards stop
         # "applications close September 2026" from cutting 20 out of the year and
-        # using it as the day — the same invention the numeric gate exists to stop,
-        # arriving through the other branch. The closed month vocabulary stops
-        # "6 separate steps" from cutting `sep` out of `separate`, which the old
-        # `[A-Za-z]{3,9}` plus a 3-letter prefix lookup read as September 6.
+        # "close September 12:30" from cutting 12 out of a clock — the same invention the
+        # numeric gate exists to stop, arriving through the other branch. The closed month
+        # vocabulary stops "6 separate steps" from cutting `sep` out of `separate`, which
+        # the old `[A-Za-z]{3,9}` plus a 3-letter prefix lookup read as September 6.
         m = re.search(
-            rf"(?<!\d)(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_TOKEN})|"
-            rf"({_MONTH_TOKEN})\s+(?<!\d)(\d{{1,2}})(?:st|nd|rd|th)?(?!\d)",
+            rf"(?<![:\d])(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_TOKEN})|"
+            rf"({_MONTH_TOKEN})\s+(?<![:\d])(\d{{1,2}})(?:st|nd|rd|th)?(?!\d)(?!:)",
             raw, re.I)
         month = day = None
         if m:

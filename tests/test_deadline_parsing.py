@@ -203,6 +203,34 @@ def test_a_digit_glued_to_a_letter_is_not_a_stated_day(text):
 
 
 @pytest.mark.parametrize("text", [
+    "deadline 12:30 in june",        # 12 and 30 are hours and minutes
+    "deadline june 12:30",
+    "deadline 12:30 september",
+    "[00:15] OCR: deadline in june",  # the pipeline's own prefix, seen as a clock
+    "[01:05] deadline in june",
+    "[00:45] OCR: last date in october",
+])
+def test_a_clock_token_does_not_state_a_day(text):
+    """`deadline 12:30 in june` returned 2027-06-09T12:30 at confidence 0.85: the month
+    from `june`, the hour from the clock, and the **day from `today`** — because
+    `_STATED_DAY`'s `\b` counted `12` and `30` as standalone numbers and dateutil then
+    filled the field the text never stated. §8's rule is the same one that killed the
+    bare-year case, and the colon guards are what hold it: a number touching a colon
+    states minutes, not a day, in either position."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
+def test_a_time_written_in_the_source_is_still_a_time():
+    """The fix must not throw away a deadline's real hour: what is stripped is ReelVault's
+    own `[MM:SS]` line marker, not a time the content states. `at 12:30` survives the
+    prefix strip, and the prefix itself no longer rides into the stored date."""
+    d = parse_deadline("[01:20] deadline 15 September at 12:30", today=TODAY)
+    assert (d.date.month, d.date.day, d.date.hour, d.date.minute) == (9, 15, 12, 30)
+    d = parse_deadline("[00:15] OCR: CLOSES OCT 5", today=TODAY)   # edu-03's saved quote
+    assert (d.date.month, d.date.day, d.date.hour, d.date.minute) == (10, 5, 0, 0)
+
+
+@pytest.mark.parametrize("text", [
     "deadline feb 30", "deadline 30 feb", "deadline 31 april", "deadline june 31",
 ])
 def test_an_impossible_date_is_kept_as_text_instead_of_raising(text):
