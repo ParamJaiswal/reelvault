@@ -55,27 +55,35 @@ _GLUED_MONTH_DAY = re.compile(
 # deadline. Only our own marker, and only at line start — a time written in the source
 # content is content and stays.
 _LINE_MARKER = re.compile(r"(?:^|\n)\[\d{1,2}:\d{2}\](?:\s*OCR:)?[ \t]*")
-# These carry a day and a month together, so no month word is needed. The two shapes
-# that state a year outright — a spaced triple and the 8-digit form stamp.
+# These state a year as part of the shape itself: a spaced triple, a separated triple
+# (15/09/2026 and the two-digit-year 15/09/26), and the 8-digit form stamp. The separated
+# triple backreferences its own separator — letting either slot be any of `/.-` admitted
+# "ROUND 1/4 - 40s WORK" as a date, measured on the corpus.
 _YEAR_BEARING_SHAPE = re.compile(
-    r"\b\d{1,2}\s+\d{1,2}\s+\d{2,4}\b"       # 15 09 2026, 15 09 26
-    r"|(?<!\d)\d{8}(?!\d)")                  # 20261015, common in form screenshots
+    r"\b\d{1,2}\s+\d{1,2}\s+\d{2,4}\b"                    # 15 09 2026, 15 09 26
+    r"|(?<!\d)\d{1,2}([/.-])\s*\d{1,2}\s*\1\s*\d{2,4}(?!\d)"   # 15/09/2026, 12-09-26, 3.9.26
+    r"|(?<!\d)\d{8}(?!\d)")                               # 20261015, form screenshots
 # A bare pair, on its own, says nothing: `5.9` is a date and so is `3.5 days`,
 # `GLM-5.2`, `4.92 25.7`, `03/07` and `1/4`. Screening the stored corpus found 24
 # sentences whose only numeric evidence is a pair, every one of them a section number,
 # version, ratio, duration or measurement, each parsed to a confident date. So a pair
-# counts only when something else says it is a date at all: a year in the sentence, or a
-# deadline hint. Ceiling this puts on recall: `12/09` with neither is kept as text.
-_PAIR_SHAPE = re.compile(r"(?<!\d)\d{1,2}\s*[/.-]\s*\d{1,2}(?!\d)")   # 15/09, 5.9, 15-09
-_YEAR_ANYWHERE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+# counts only when a deadline hint is in the same text — the ceiling is that `12/09`
+# without one is kept as text.
+# A year elsewhere in the sentence is NOT a cue: measured, `"2026 GLM 5.2"`,
+# `"Table 1/4 (2026)"` and `"the 2026 report shows 4.92 growth"` all parse to a date
+# once any 19xx/20xx run is treated as evidence, and papers state years constantly. The
+# year has to be part of the shape, which is what `_YEAR_BEARING_SHAPE` above is for.
+# Right edge rejects letters, not just digits: `5.30pm`, `3.5km` and `12.5hrs` abut a
+# unit, and dateutil turns `5.30` into a day-and-month with the day from `today`. The
+# LEFT edge stays digit-only, because OCR glues a collapsed label to the date it
+# precedes — `LAST DATE12/09` states a real pair and must survive.
+_PAIR_SHAPE = re.compile(r"(?<!\d)\d{1,2}\s*[/.-]\s*\d{1,2}(?![\da-zA-Z])")  # 15/09, 5.9
 
 
 def _states_day_and_month(text: str) -> bool:
     if _YEAR_BEARING_SHAPE.search(text) or _GLUED_MONTH_DAY.search(text):
         return True
-    if _PAIR_SHAPE.search(text) and (
-            _YEAR_ANYWHERE.search(text)
-            or any(h in text.lower() for h in DEADLINE_HINTS)):
+    if _PAIR_SHAPE.search(text) and any(h in text.lower() for h in DEADLINE_HINTS):
         return True
     return bool(_MONTH_WORD.search(text) and _STATED_DAY.search(text))
 

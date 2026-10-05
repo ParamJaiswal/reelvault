@@ -244,9 +244,10 @@ def test_a_bare_pair_is_a_date_only_when_something_says_it_is(text):
     day and a month, which is true of `5.9` and equally true of `3.5 days`, `GLM-5.2`,
     `03/07` and every section number in the two paper rows. Screening the corpus found
     **24 such sentences** parsed to a confident date, all of them content; a bare pair now
-    counts only when the sentence also carries a year or a `DEADLINE_HINTS` word, and the
-    spaced triple, the 8-digit stamp and the collapsed `August25` forms keep working
-    because they state a year or a month themselves.
+    counts only with a `DEADLINE_HINTS` word in the same text. Forms that carry a third
+    numeric component (`15/09/26`, `15 09 2026`) or name a month (`August25,2026`) still
+    parse on their own shape — which is shape evidence, not semantic proof: `3 5 20
+    minutes apart` rides through, and it is named in the residual list rather than hidden.
 
     The ceiling is deliberate and it is a recall one: `registrations 12/09` with no year
     and no hint word stays text. §8 prefers text over a guess, so the test pins both
@@ -266,6 +267,40 @@ def test_a_year_less_hint_less_pair_is_kept_as_text(text):
 
 
 @pytest.mark.parametrize("text", [
+    "apply by 15/09/26",                 # two-digit year: a triple, not a bare pair
+    "closes 3.9.26",
+    "12-09-2026",
+    "LAST DATE12/09",                    # OCR glues the label to the pair, and it is a pair
+])
+def test_a_separated_triple_states_a_year_and_needs_no_hint(text):
+    """The pair gate must not swallow real dates on the way to the section numbers. A
+    first version of it required a `19xx/20xx` run *anywhere* in the sentence instead of
+    requiring the year inside the shape, which both refused `15/09/26` (a complete date,
+    no cue) and admitted `2026 GLM 5.2` (a stray year next to a version). Adjacency is
+    the whole distinction, so both directions are pinned here."""
+    assert parse_deadline(text, today=TODAY).date is not None
+
+
+@pytest.mark.parametrize("text", [
+    "closes at 5.30pm sharp",            # `closes` is a hint; 5.30 is a time written with a dot
+    "deadline 3.5km",
+    "deadline 12.5hrs",
+    "2026 GLM 5.2",                      # a year that belongs to nothing
+    "batch 2030 mAh, ratio 1/4",
+    "the 2026 report shows 4.92 growth",
+    "Table 1/4 (2026)",
+    "ROUND 1/4 - 40s WORK / 20s REST",   # two different separators is not a date triple
+])
+def test_a_stray_year_is_not_a_date_cue_and_a_unit_is_not_a_day(text):
+    """Every case here parsed as a confident date at some point during this change:
+    `5.30pm`/`3.5km`/`12.5hrs` because the pair's right edge checked for digits only, and
+    the four stray-year ones because a 19xx/20xx run anywhere in the text was treated as
+    evidence the pair was a date. Papers state years constantly, so position-blindness
+    re-opened the exact family the gate exists to close."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
+@pytest.mark.parametrize("text", [
     "deadline feb 30", "deadline 30 feb", "deadline 31 april", "deadline june 31",
 ])
 def test_an_impossible_date_is_kept_as_text_instead_of_raising(text):
@@ -279,11 +314,17 @@ def test_an_impossible_date_is_kept_as_text_instead_of_raising(text):
     assert "unparseable" in d.note
 
 
-@pytest.mark.xfail(reason="residual, recorded in docs/EVAL.md: a duration can read as "
-                          "the day-and-month pair the gate asks for, so "
-                          "'deadline 2029 in 1-2 days' still yields 2029-02-01. "
-                          "Distinguishing a pair from a range needs a unit-aware "
-                          "scan, not a wider regex.", strict=False)
+@pytest.mark.xfail(reason="residual, recorded in docs/EVAL.md. Three shapes still invent "
+                          "a date and none of them is a pair the gate can see: a duration "
+                          "('deadline 2029 in 1-2 days' -> 2029-02-01, a range read as the "
+                          "day-month pair); a deadline hint riding on an unrelated numeric "
+                          "('the store closes 5.4 times a week' -> Nov 5, because `closes` "
+                          "is a hint and the gate then trusts the pair); and `may`, which is "
+                          "both a month name and the commonest modal in this corpus, paired "
+                          "with any standalone number ('[11] There may be some very "
+                          "unworldly people' -> May 11 — 2 such sentences survive the full "
+                          "corpus screen). All three need sense or position awareness, not a "
+                          "wider regex, and all three predate the pair gate.", strict=False)
 def test_a_duration_is_not_a_day_and_month_pair():
     assert parse_deadline("deadline 2029 in 1-2 days", today=TODAY).date is None
 
