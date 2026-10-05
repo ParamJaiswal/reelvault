@@ -358,6 +358,64 @@ class TestStageFlow:
               f"source_fallback={row['deadline_raw']!r}")
         assert persisted == expected.date()
 
+    def test_a_date_the_source_never_states_never_reaches_the_deadline_columns(
+            self, tmp_db, monkeypatch, sample_user):
+        """Every fabrication family in the parser (bare year, clock token, month alias
+        inside a word, impossible date, and the pipeline's own `[MM:SS]` prefix) was found
+        by probing `parse_deadline` directly. Nothing proved the *stage* keeps them out of
+        the two columns the reminder scanner reads, so this runs them through it.
+
+        One reel carries all five shapes as OCR, plus a deadline the source really does
+        state. The model cites one of the bad shapes as a `deadline` fact, which is the
+        path that boosts a parse to the fact's own confidence — so if any shape starts
+        parsing again it wins the column instead of the true date and this fails. It also
+        fails if the stage simply dies, because the positive control asserts a date landed.
+        """
+        from datetime import datetime
+
+        from app.knowledge import deadlines
+        from app.pipeline import stages
+
+        today = datetime(2026, 9, 9)
+        overlays = [
+            (5.0, "deadline in june"),              # day would come from `today`
+            (6.0, "@kevinnaughtonjr 1."),           # `aug` inside nAUGHTONJR
+            (7.0, "deadline 12:30 in june"),        # clock states minutes, not a day
+            (8.0, "deadline 30 feb"),               # impossible date, used to raise
+            (9.0, "the deadline is 2029"),          # bare year
+            (10.0, "CLOSES OCT 5"),                 # the one real date
+        ]
+        entry = {"value": "june", "quote": "deadline in june"}
+        replies = iter([
+            json.dumps({"categories": ["Education"], "primary_schema": "education"}),
+            json.dumps({"deadline": [entry]}),
+        ])
+        llm = FakeLLM("")
+        monkeypatch.setattr(llm, "chat", lambda *args, **kwargs: next(replies))
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: llm)
+        original = deadlines.best_deadline
+        monkeypatch.setattr(deadlines, "best_deadline",
+                            lambda facts, text: original(facts, text, today=today))
+
+        rid = mk_reel(sample_user, shortcode="DLbadshapes")
+        with get_db() as db:
+            for t_s, text in overlays:
+                db.execute("INSERT INTO ocr_results(reel_id, t_s, text, conf)"
+                           " VALUES (?,?,?,?)", (rid, t_s, text, 1.0))
+        stages.stage_classify_extract(rid, {})
+
+        with get_db() as db:
+            row = dict(db.execute("SELECT deadline_iso, reminder_iso, deadline_raw"
+                                  " FROM reels WHERE id=?", (rid,)).fetchone())
+        expected = deadlines.parse_deadline("CLOSES OCT 5", today=today).date.date()
+        assert row["deadline_raw"] and "CLOSES OCT 5" in row["deadline_raw"]
+        assert datetime.fromisoformat(row["deadline_iso"]).date() == expected
+        # Nothing above `CLOSES OCT 5` may have been invented: every bad shape parses to
+        # None now, and a regression would show up as a different stored date, not as a
+        # NULL (the positive control holds that up).
+        assert datetime.fromisoformat(row["reminder_iso"]) <= datetime.fromisoformat(
+            row["deadline_iso"])
+
     def test_entity_hallucination_is_not_persisted(
             self, tmp_db, monkeypatch, sample_user):
         """Entities are model output too: a name no source span supports must

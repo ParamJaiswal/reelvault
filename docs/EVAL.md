@@ -1537,6 +1537,17 @@ test case, the alias class has eight invented shapes plus the two live ones, and
 crash has its own test — a `ValueError` out of this function is a failed extraction
 stage, not a bad row.
 
+**The stage now guards what only the function did.** Every family above was found by
+probing `parse_deadline` directly; nothing proved the pipeline kept them out of the two
+columns the reminder scanner reads. `tests/test_pipeline.py::
+test_a_date_the_source_never_states_never_reaches_the_deadline_columns` puts all five
+shapes on one reel as OCR plus one real date, cites a bad shape as the model's
+`deadline` fact (the path that boosts a parse to the fact's confidence), and asserts the
+stored `deadline_iso`/`deadline_raw` come from the real date. Verified to **bite**, not
+just pass: replayed against `fae7028`'s parser it fails with
+`deadline_raw == "[00:05] OCR: deadline in june"` — the invented date winning the column
+over `CLOSES OCT 5`, exactly the outcome §8 forbids.
+
 **Process note.** Defects 3 and 4 came from the review round after the first version, and
 neither showed in the tests that version shipped with: they were green while the change
 was actively worse than HEAD on `may` sentences and on impossible dates. Screen the

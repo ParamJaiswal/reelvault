@@ -1957,14 +1957,20 @@ Done:
   call rather than narrowed unilaterally. This is the fourth successive *latent* family in
   this module — each measures zero on today's library and each goes live the moment the
   library contains real deadline content.
+- **Added the stage-level guard the whole family lacked.** Five shapes (bare year, clock
+  token, alias inside a word, impossible date, the `[MM:SS]` prefix) on one reel plus one
+  real date, asserted through `stage_classify_extract` so the columns the scanner reads are
+  what's checked, with the positive control so a dead stage can't pass. Shown to fail
+  against `fae7028`'s parser — it wrote `deadline_raw = "[00:05] OCR: deadline in june"`,
+  the invented date beating the real `CLOSES OCT 5` — and to pass on HEAD.
 - Recorded in `docs/EVAL.md` as a new dated section, with pointers on the two Sep-25
   lines this supersedes rather than silently rewriting them.
 
 Verification:
 - `pytest tests/test_deadline_parsing.py tests/test_deadlines.py
-  tests/test_deadline_reminder.py tests/test_pipeline.py -q` → **91 passed, 1 xfailed**.
-- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **405 passed, 3 skipped,
-  1 xfailed** (374 → 405; +31 are the new parametrized cases).
+  tests/test_deadline_reminder.py tests/test_pipeline.py -q` → **92 passed, 1 xfailed**.
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **406 passed, 3 skipped,
+  1 xfailed** (374 → 406; +32 are the new cases, incl. the stage-level guard).
 - `pytest tests/test_phase1_fixes.py tests/test_phase2_config.py
   tests/test_phase3_pipeline_proof.py tests/test_phase3_queue_failure.py
   tests/test_phase5_corrections.py tests/test_phase7_url_ingest.py -q` → **31 passed,
