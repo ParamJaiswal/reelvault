@@ -1248,11 +1248,11 @@ owner content, so this library really does contain no live deadline. The finding
 about the scanner's vocabulary, not about a missed real obligation.
 
 **Why the vocabulary matters more than that caveat suggests.** `DEADLINE_HINTS`
-(`app/knowledge/deadlines.py:24-26`) carries "apply by", "register by", "closes",
+(`app/knowledge/deadlines.py:46-48`) carries "apply by", "register by", "closes",
 "submit before" — **not "due"**, so an invoice line never becomes a candidate for the
-rules fallback (`deadlines.py:202-203`). But the fallback is only one of two entry
+rules fallback (`deadlines.py:223-224`). But the fallback is only one of two entry
 points: `best_deadline` also parses any verified fact whose **field name** contains
-"deadline" or "due" (`deadlines.py:188`), with no hint gate at all. So sentences reach
+"deadline" or "due" (`deadlines.py:209`), with no hint gate at all. So sentences reach
 `parse_deadline` from two directions, and only one of them was being screened. Adding
 "due" to the hints is a widening decision, left to the owner.
 
@@ -1265,7 +1265,7 @@ sentence can become the year — and the invoice amount was one:
 |---|---|---|
 | `"Deadline for the payment: invoice 4500 due 15 September"` | **4500-09-15**, conf 0.85 | rejected, kept as text |
 | `"Deadline for the payment: invoice 2000 due 15 September"` | **2027-09-15**, conf 0.85, reminder **2027-09-10** | rejected, kept as text |
-| `"the deadline was 2019"` | 2027 (rolled) | rejected |
+| `"the deadline was 2019"` | 2027-09-09 @0.85 (rolled) | rejected |
 | `"closes 2036-05-05"` / `"closes 2037-05-05"` | 2036 / 2037 both accepted | 2036 accepted / 2037 rejected |
 | `"deadline: 5 Oct"`, `"apply by 2026-10-01"`, `"apply by 10 January 2027"` | unchanged | unchanged |
 
@@ -1280,13 +1280,44 @@ column and eventually does. The fix keeps the year **as the source stated it**
 three parse branches converge. `today.year - 1 … today.year + 10` is a window, not a
 ban — `2036` in, `2037` out, which is what the parametrized case pins.
 
-**Named, tested-against, and not patched:** a bare *plausible* year with no month or
-day still borrows them from `today` — `"the deadline is 2029"` → **2029-09-09 at
-confidence 0.85**, reminder 2029-09-04 — the same probe the `xfail` test runs. Closing that means requiring explicit
-month-or-day evidence before trusting dateutil's `fuzzy` result, which is a
-parse-behaviour change and not part of a bug fix. `tests/test_deadline_parsing.py`
-carries it as a non-strict `xfail` with this reason, so the suite states the violation
-of §8 instead of quietly agreeing with it.
+**The same invention, in a place a window cannot reach.** A bare *plausible* year with
+no month or day borrows both fields from `today`: `"the deadline is 2029"` returned
+**2029-09-09 at confidence 0.85** with a reminder on 2029-09-04, and no year window can
+catch that because 2029 *is* plausible. Those defaults are exactly what
+`fuzzy=True, default=today` fills in, so the numeric branch now requires the sentence to
+state **both** the day and the month (`_states_day_and_month`,
+`app/knowledge/deadlines.py:24-44`, applied at `:98`) — a numeric shape that carries the
+pair on its own (`15/09`, `5.9`, `15 09 2026`, `15 09 26`, `20261015`), or a month name
+**with** a standalone day number. `"apply by 2030"`, `"last date 1999"` and
+`"apply by 22nd"` now stay text.
+
+A review round on that gate found three more ways it leaked, all measured, all fixed:
+
+- **`"mar"` inside `"remarks"`** — the month alternation had no word boundary, so
+  `"deadline 2029 see remarks"` opened the gate and still produced 2029-09-09. The
+  alternation is now wrapped in `\b…\b`.
+- **The same invention through the other branch.** `"applications close September 2026"`
+  still parsed — to **2026-09-20** at confidence 0.75 — because the month-name branch's
+  own `(\d{1,2})` cut `20` out of `2026` and used it as the day. A leading `(?<!\d)` on
+  that group, plus `(?!\d)` where the day ends the match (`:116-124`), closes it. Gating
+  branch 1 alone left the class wide open while its own tests went green: the first
+  version blocked exactly the shapes it named, nothing of the kind beside them.
+- **`"may"` is both a month and the most common modal** in this corpus, so a
+  month-and-day rule (not month-or-day) is what keeps `"you may apply by 2029"` out.
+
+**Residual, recorded rather than patched:** a *duration* can read as the day-and-month
+pair the gate asks for — `"deadline 2029 in 1-2 days"` still yields 2029-02-01. Telling a
+pair from a range needs a unit-aware scan, not a wider regex. It sits as a non-strict
+`xfail` (`tests/test_deadline_parsing.py`) so the suite states the remaining §8 violation
+instead of agreeing with it.
+
+Measured before trusting the rule: all **4 golden `date_text` cases still parse
+identically** (`'5th of October'`, `'September 15'`, `'October 20'`, `'November 30'`) and
+the live scan above still returns 1 hint sentence / 0 parseable. The tests pin both
+directions — eleven unstated forms must not parse, seven stated day-and-month forms must
+still parse — so the gate cannot quietly become a ban. An earlier draft of this section
+recorded the bare-year hole as accepted behind an `xfail`; that `xfail` is gone, the
+behaviour is fixed, and a new one marks what is genuinely still open.
 
 **OCR word-boundary collapse, measured.** Of 144 `ocr_results` rows, **20 rows on 9 of
 28 reels** carry a space-free run of ≥40 characters (worst 94):

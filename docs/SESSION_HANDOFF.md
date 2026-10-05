@@ -1714,16 +1714,28 @@ Done:
   `app/core/push.py:134-147`) but a 2027 one lands in the column and eventually does.
   The shipped guard keeps the year **as the source stated it** (`parsed_year`, captured
   before any rollover) and windows that.
-- Named, pinned, **not** patched: a bare plausible year with no month or day still
-  borrows them from today — `"the deadline is 2029"` → 2029-09-09 at conf 0.85,
-  reminder 2029-09-04. Closing it needs explicit month-or-day evidence before trusting
-  a `fuzzy` parse, i.e. a parse-behaviour change. Recorded as a non-strict `xfail` so
-  the suite states the §8 violation instead of agreeing with it.
-- `DEADLINE_HINTS` (`app/knowledge/deadlines.py:24-26`) has "apply by", "closes",
+- **Stopped the invention at its source**, which an earlier draft of this section had
+  accepted as a limitation. dateutil's `default=today` supplies any field the text omits,
+  so `"the deadline is 2029"` parsed to 2029-09-09 at confidence 0.85 with a reminder on
+  2029-09-04 — and no year window can catch it, because 2029 is plausible. The numeric
+  branch now requires the sentence to state **both** a day and a month
+  (`_states_day_and_month`, `app/knowledge/deadlines.py:24-44`, applied at `:98`).
+- **A review round on that gate found three leaks it had shipped with**, each measured
+  before being fixed: the month alternation lacked word boundaries (`"mar"` in
+  `"remarks"` opened the gate); the *month-name* branch had the same invention from the
+  other side, reading `20` out of `2026` as the day so `"applications close September
+  2026"` parsed to 2026-09-20 at 0.75 (lookarounds at `:116-124`); and `may` is both a
+  month alias and the commonest modal in this corpus, which is why the rule is day
+  **and** month, not day **or** month. Gating one branch alone would have left the class
+  open while its own tests stayed green.
+- **Residual, recorded not patched:** a duration still reads as a day-and-month pair —
+  `"deadline 2029 in 1-2 days"` → 2029-02-01. Separating a pair from a range needs a
+  unit-aware scan. Kept as a non-strict `xfail` so the suite states the §8 violation.
+- `DEADLINE_HINTS` (`app/knowledge/deadlines.py:46-48`) has "apply by", "closes",
   "submit before" but **not "due"**, so an invoice line never reaches the rules
-  fallback (`:202-203`). Left as an owner decision — and the entry point is broader
+  fallback (`:223-224`). Left as an owner decision — and the entry point is broader
   than the fallback: `best_deadline` also parses any verified fact whose **field name**
-  contains "deadline" or "due" (`:188`) with no hint gate, so only one of the two
+  contains "deadline" or "due" (`:209`) with no hint gate, so only one of the two
   directions was ever screened.
 - Measured OCR word-boundary collapse: **20 of 144 `ocr_results` rows on 9 of 28
   reels** carry a space-free run ≥40 chars (worst 94). Not our join
@@ -1740,13 +1752,20 @@ Done:
   the two accepted limitations, and what cleanup the fix does and does not need.
 
 Verification:
-- `pytest tests/test_deadline_parsing.py -q` → **18 passed, 1 xfailed**: the
-  4500 regression (asserted through `best_deadline` as well as `parse_deadline`), the
-  promoted-year 2000 case that the first guard missed, `("the deadline was 2019", None)`
-  added to the window parametrization, and the non-strict xfail for the bare-2029 hole.
-- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **367 passed, 3 skipped,
-  1 xfailed**. Wall-clock deliberately not quoted: three runs of this same suite in
-  one day came in at 21.89 s, 43.82 s and 27.37 s on an unchanged tree.
+- `pytest tests/test_deadline_parsing.py -q` → **25 passed, 1 xfailed**: the 4500 regression
+  (asserted through `best_deadline` as well as `parse_deadline`), the promoted-year 2000
+  case the first guard missed, four bare-year forms that must stay text, and a
+  parametrization proving the gate still parses `15 09 2026`, `15 09 26`, `15.09.2026`,
+  `5.9`, `31st March`, `1 October 2026` and `20261015` — so it cannot quietly become a ban.
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **374 passed, 3 skipped,
+  1 xfailed**.
+- **One flake observed and explained, not hidden**: on the first run of that suite
+  `tests/test_reliability.py::test_truncated_video_fails_fast` failed, then passed in
+  isolation (0.39 s) and again in a clean full run. It asserts `elapsed < 15` around
+  real `ffmpeg`/`ffprobe` subprocess work (`tests/test_reliability.py:151`) while
+  llama-server and the app are running on the same box, so it is a load-sensitive
+  assertion, not a regression from this change. Left alone: raising the threshold to
+  make a flake disappear destroys the signal it exists to catch.
 - Before/after measured by loading `git show HEAD:app/knowledge/deadlines.py` beside
   the working tree and feeding both the same inputs, not by reading the diff.
 - **No library cleanup needed**: `deadline_iso`, `reminder_iso`, `deadline_raw` are 0
@@ -1762,8 +1781,8 @@ already rewritten is the same mistake as a guard on the wrong field.
 
 Next:
 - Owner decision only: widen `DEADLINE_HINTS` with "due" (cost: more sentences reach a
-  parser that now has a year window), or accept that invoices and similar on-screen
-  text stay outside deadline tracking.
+  parser that now carries a year window and a day-and-month rule), or accept that
+  invoices and similar on-screen text stay outside deadline tracking.
 - Unchanged from the previous section: the cross-segment transcript span (measure
   live-library recovery first) and the 50-commit merge question. Nothing else is queued.
 
