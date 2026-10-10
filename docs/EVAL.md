@@ -1929,21 +1929,72 @@ Residuals that remain, none of them a date the stored corpus still invents:
 - `deadline 1.2 million` and `apply by 1.5 km` → the 1st of whatever month the scan runs in, at
   whatever year the rolling policy lands on. The unit list has no scale words or distances, and
   enumerating them is not a rule.
-- `deadline may 11.5pm` → 2027-05-09, and `deadline june 12.30pm` → 2027-06-09: the lookahead
-  spans whitespace only, so a number separated from its clock suffix by a dot still supplies a
-  day, and dateutil takes the day from `today`. Identical at `fdd3210`; the class the clock rule
-  exists to close, reached through punctuation it does not cover.
-- `INVOICE 4500 DUE 15 SEPTEMBER` → text, note "year outside plausible window". The stated
-  `15 SEPTEMBER` is a real deadline, but dateutil reaches it through the numeric branch first,
-  takes `4500` as the year, and the window rejection returns before the month-name branch — which
-  would have read it correctly — is ever consulted. Pre-existing (identical before and after this
-  release), and a control-flow ceiling rather than a policy one. It is worth naming separately
-  because the scanner never even reaches it under the shipped hints: that row produces **no**
-  candidate sentence, since `due` alone is no longer a cue.
 - `July13.` inside a run glued on both sides: dateutil's tokenizer, needs an OCR-aware split.
 - A bare `12/09` with no cue, and `due 12/09`.
 - The non-adjacent month-and-day class above.
 
+The first draft of this list also carried `deadline may 11.5pm` → 2027-05-09 and an invoice-line
+recall ceiling; both were closed and reopened as decisions the next day — see the section after
+the tag, which supersedes those two entries.
+
 The golden extraction eval (`tests/test_ai_eval.py`) was **not** re-run: it needs llama-server,
 and nothing in this change touches prompts, the model, OCR, STT, the evidence matcher or an
 extraction schema — the parser-level golden checks above are the evaluation for it.
+
+## October 10, 2026 (after the tag) — a decimal is not a day, and a rejected recovery
+
+Two things the release section left as residuals turned out to be different in kind: one was a
+hole in a rule that claimed to close it, and one was a recall loss whose cure measured worse than
+the loss. Both are `app/knowledge/deadlines.py` correctness, which AGENTS.md §3 keeps open.
+
+**The decimal hole, fixed.** `(?!\d)` at the end of a day capture stops digits, not a decimal
+point, so the clock rule the release shipped could not see past a dot. Three month-then-day forms
+were inventing a day and a time of day at confidence 0.85 — `deadline may 11.5pm` → 2027-05-09
+T23:00, `deadline june 12.30pm` → 2027-06-09T12:00, `deadline august 9.30am` → 2027-08-09T09:00 —
+and three day-then-month forms were reading a version, a section and a ratio as a date:
+`v2.5 march release` → 2027-03-02, `3.15 september` → 2026-09-03, `deadline 2.5april` →
+2027-04-02. The fix is `(?!\.\d)` on the month-then-day day positions and `(?<!\d\.)` on the
+day-then-month ones, in the gate, the month-name branch and the glued rule.
+
+Which side each guard belongs on was decided by experiment rather than by symmetry: every one of
+the six sites was removed in turn and the tests re-run, and the same guard on the *other*
+position failed nothing, so the inert copies were not added. Measured against the corpus the fix
+**changes no stored sentence at all** — 6 parses before, 6 after, zero flips at three reference
+dates — because no stored line puts a decimal next to a month name. It is a pure refusal of forms
+the library has not produced yet, which is exactly the class v0.2.0 ingests (papers carry version
+and section numbers constantly). `deadline 11.5 may` still parses to 2027-05-11, and that one is
+not reachable from here: it rides in through the bare-pair clause on the strength of the word
+`deadline`, the same hint-riding-number residual as `3.5 august deadline`.
+
+**The recovery that was built, measured, and refused.** The release named
+`INVOICE 4500 DUE 15 SEPTEMBER` → text as "a control-flow ceiling rather than a policy one",
+because the numeric branch takes `4500` as the year, the plausibility window rejects it, and the
+month-name branch — which would read `15 SEPTEMBER` correctly — never runs. Making the rejection
+fall through instead of returning was implemented and measured on the library, and the corpus
+answer is decisive:
+
+| | shipped rejection | fall-through |
+|---|---|---|
+| `INVOICE 4500 DUE 15 SEPTEMBER` | text | 2026-09-15 @ 0.75 — correct |
+| `arXiv:1706.03762v7 [cs.CL] 2 Aug 2023` | text | **2027-08-02 @ 0.75 — invented** |
+| corpus parses | 6 | 8 |
+
+One real date recovered, one fabrication added, on a library whose dominant v2 source is arXiv and
+whose every paper row carries that stamp. The stated-but-impossible year is the only evidence on
+that line that it is a submission date rather than a deadline, and keeping its day and month while
+discarding its year is the guess §8 forbids — the reminder scanner would have fired on a paper's
+submission date. So the window rejection stays terminal, and
+`test_the_year_window_rejection_is_terminal_rather_than_passed_on` pins both lines so the argument
+has to be had against the measurement again rather than against the prose. The invoice's deadline
+is an accepted recall loss, which is what the UI correction path is for.
+
+Verification for this section: `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **482 passed /
+3 skipped / 0 xfailed** (473 before these cases); the six v0.1 phase-gate files → **31 passed / 1
+skipped**. The mutation battery now runs nine mutations: the three new ones are day right-edge
+guard removed (all three sites) → 4 assertions fail, day left-edge guard removed (all three sites)
+→ 3, and window rejection made non-terminal → 1. They replace the release section's three separate
+day-position rows, because the guards are no longer three sites of one rule but two different
+guards on two different positions. The other six reproduce exactly as that section recorded (6 /
+18 / 5 / 6 / 1 / 3). Each mutation was applied to the real file, the tests run against it, and the
+file restored and SHA-compared (`restored byte-identical: True`), and every one failed something.
+DB opened read-only throughout.

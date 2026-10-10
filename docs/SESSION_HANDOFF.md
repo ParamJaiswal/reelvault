@@ -2288,3 +2288,62 @@ Next:
 - After that, the open items are operational rather than analytical: the Jev gate needs
   `AI_GATEWAY_API_KEY` in the environment that starts Qoder, and `AGENTS.md` §3 now records the
   four decisions as taken rather than reserved.
+
+## A decimal is not a day, and a recovery that measured worse than the loss (2026-10-10, after the tag)
+
+Date: 2026-10-10
+Phase: v0.2.0 follow-up — `app/knowledge/deadlines.py` correctness, the file AGENTS.md §3 keeps
+open. The release itself is shipped: `main` and `v2-hybrid-routing` at `022dddc`, tag `v0.2.0` at
+the release commit `40c249b`.
+
+Done:
+- **Decimal day positions fixed.** `(?!\.\d)` on the month-then-day day positions and
+  `(?<!\d\.)` on the day-then-month ones, in the adjacency gate, the month-name branch and the
+  glued rule. `(?!\d)` stops digits and not a decimal point, so the clock rule
+  shipped in v0.2.0 could not see past a dot: `deadline may 11.5pm`, `deadline june 12.30pm` and
+  `deadline august 9.30am` returned a day wearing a time of day at 0.85, and `v2.5 march release`,
+  `3.15 september` and `deadline 2.5april` read a version, a section and a ratio as a date. The
+  last three are the forms the paper and article sources produce constantly, which is why this is
+  worth a commit rather than a comment.
+- **Which guard goes where was decided by experiment.** All six sites were removed one at a time
+  and the tests re-run; the same guard on the other position failed nothing, so the inert copies
+  were left out instead of added for symmetry.
+- **A recovery built, measured, and refused.** The release described the year-window rejection as
+  "a control-flow ceiling rather than a policy one" and that framing was wrong. Making it fall
+  through to the month-name branch recovers `INVOICE 4500 DUE 15 SEPTEMBER` → 2026-09-15 @ 0.75
+  and invents `arXiv:1706.03762v7 [cs.CL] 2 Aug 2023` → 2027-08-02 @ 0.75; corpus parses go 6 → 8,
+  one real and one fabricated, on a library whose dominant v2 source is arXiv. The rejection stays
+  terminal. The v0.2.0 docs' "it would have read it correctly" sentence has been replaced with the
+  measured reason it must not.
+
+Verification:
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **482 passed, 3 skipped, 0 xfailed** (473
+  before these cases).
+- v0.1 merge gate (the six `test_phase*` files) → **31 passed, 1 skipped**.
+- Corpus screen vs `022dddc`, both modules fed the identical 2,638 sentences: **6 parses before,
+  6 after, zero flips**, stable at `today` = 09-09 / 10-05 / 11-20. The decimal fix refuses forms
+  the stored library does not contain; it costs nothing there and invents nothing there.
+- Mutation battery, nine mutations, each applied to the real file, tests run, file restored and
+  SHA-compared (`restored byte-identical: True`), every one failing at least one assertion: day
+  right-edge guard removed (3 sites) → 4 fail; day left-edge guard removed (3 sites) → 3 fail;
+  window rejection made non-terminal → 1 fail; plus the release's six, reproducing at 6 / 18 / 5 /
+  6 / 1 / 3. Scratch harnesses deleted before the commit; DB opened read-only throughout.
+- New cases: `test_a_decimal_does_not_state_a_day` (7 forms, and the glued `deadline 2.5april`
+  sits beside the pinned positive `deadline 25august` so the guard cannot be widened by accident),
+  `test_the_year_window_rejection_is_terminal_rather_than_passed_on` (both lines), and
+  `apply by the 3rd of April 2027` added to the stated-day-and-month positives.
+
+Uncertain / not verified:
+- `tests/test_ai_eval.py` still not run (needs llama-server). Nothing here touches prompts, the
+  model, OCR, STT, the evidence matcher or a schema.
+- `deadline 11.5 may` → 2027-05-11 still parses. It is not reachable from the day positions: the
+  word `deadline` rescues `11.5` through the bare-pair clause, so it is the hint-riding-number
+  residual (`3.5 august deadline` is its sibling), not a hole in this fix. Closing it means
+  deciding what a rescued pair may be followed by, which is a policy call for the owner.
+- The `due` → `due date` deviation from the authorized decision still stands and still needs the
+  owner's ratification or overrule; `due 12/09` remains text.
+- The tag `v0.2.0` points at the release commit, one docs-only commit behind `main`.
+
+Next:
+- Owner decision on whether the follow-up commit is pushed to `main` (it is not yet), and on the
+  `due date` deviation.

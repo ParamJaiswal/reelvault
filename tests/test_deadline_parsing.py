@@ -116,6 +116,46 @@ def test_an_amount_below_this_year_is_not_promoted_into_a_deadline():
     assert best_deadline([], line, today=TODAY) is None
 
 
+def test_the_year_window_rejection_is_terminal_rather_than_passed_on():
+    """The obvious reading of `INVOICE 4500 DUE 15 SEPTEMBER` is that the window rejection is
+    throwing away a date the line does state — `15 SEPTEMBER` is right there — and that the
+    month-name branch should get a turn after the numeric branch fails it. That was built and
+    measured on this library: the fall-through recovers the invoice line and invents
+    `2027-08-02 @ 0.75` out of `arXiv:1706.03762v7 [cs.CL] 2 Aug 2023`, because an implausible
+    stated year is the only evidence on that line that it is a submission stamp rather than a
+    deadline, and keeping its day and month while dropping its year is precisely the guess §8
+    forbids. Papers are the dominant v2 source and every one carries that stamp, so the corpus
+    price was one real date recovered and one fabrication added. The rejection stays terminal;
+    the invoice's deadline is an accepted recall loss for the UI correction path to handle."""
+    for line in ("Deadline for the payment: invoice 4500 due 15 September",
+                 "arXiv:1706.03762v7  [cs.CL]  2 Aug 2023"):
+        d = parse_deadline(line, today=TODAY)
+        assert d.date is None and d.reminder_date is None, line
+
+
+@pytest.mark.parametrize("text", [
+    "deadline may 11.5pm",         # a decimal followed by a clock suffix: the unit lookahead
+    "deadline june 12.30pm",       # spans whitespace only, so it never saw the `pm` past the
+    "deadline august 9.30am",      # dot and dateutil supplied the day from `today`
+    "may11.5pm",                   # glued, the way an OCR line arrives
+    "v2.5 march release",          # a version number, not the 2nd of March
+    "deadline 2.5april",           # glued the same way, where `25august` must still survive
+    "3.15 september",              # a section number, not the 3rd of September
+])
+def test_a_decimal_does_not_state_a_day(text):
+    r"""`(?!\d)` at the end of a day capture stops digits, not a decimal point, so `11` inside
+    `11.5pm` counted as a stated day and the first two cases below came back 2027-05-09T23:00,
+    2027-06-09T12:00 and 2027-08-09T09:00 at confidence 0.85 — three reminders on times of day.
+    The guard sits on both sides of the day, `(?!\.\d)` and `(?<!\d\.)`, because `v2.5 march`
+    and `3.15 september` put the fraction where the day would otherwise be read. Measured on the
+    corpus: no sentence changes either way, so this is not a recall trade, and every form that
+    states a whole day next to a month (`Apply by Sept. 15`, `the 3rd of April 2027`,
+    `closes 3.4 march`) still parses. What it does not reach is a decimal rescued by a hint word
+    through the bare-pair clause — `deadline 11.5 may` -> 2027-05-11 — which is the same
+    hint-riding-number residual as `3.5 august deadline`."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
 def test_a_date_the_text_does_not_state_is_not_parsed():
     """`fuzzy=True, default=today` makes dateutil fill any field the text left out,
     and the month-name branch had the same hole from the other side. Each of these
@@ -144,6 +184,7 @@ def test_a_date_the_text_does_not_state_is_not_parsed():
     "apply by 15.09.2026",       # dotted separator
     "last date 5.9",
     "deadline 31st March",       # ordinal + month name
+    "apply by the 3rd of April 2027",   # ordinal, `of`, and a year: the decimal guard's edge
     "expiry 20261015",           # compact stamp, common in form screenshots
     "1 October 2026",
     "closes 3 Sep",              # bare alias, no year

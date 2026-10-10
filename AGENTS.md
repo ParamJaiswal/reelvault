@@ -8,7 +8,7 @@ v2-hybrid-routing main`, and `git rev-list --count main..v2-hybrid-routing` for 
 not quote either here, the next commit invalidates a count). The frozen v0.1 line is tag
 `v0.1.0` (`b8b0533`). See `docs/INGESTION.md` for the v2 sources.
 
-The v0.1 merge rule still holds: **every v2 merge must keep the v0.1 suite green**, `content_kind` defaults to `video` and `RV_LLM_BACKEND` defaults to local, so v0.1 behaviour is preserved by construction. Both were re-verified on October 10, 2026 at the v0.2.0 merge (473 passed / 3 skipped / 0 xfailed; the v0.1 phase-gate files alone are 31 passed / 1 skipped).
+The v0.1 merge rule still holds: **every v2 merge must keep the v0.1 suite green**, `content_kind` defaults to `video` and `RV_LLM_BACKEND` defaults to local, so v0.1 behaviour is preserved by construction. Both were re-verified on October 10, 2026 on the shipped branch (482 passed / 3 skipped / 0 xfailed; the v0.1 phase-gate files alone are 31 passed / 1 skipped).
 
 **What the v2 schema does to a v0.1 rollback — know this before you do one.** The v0.1 code is schema v5 and the current code is v9, and `SCHEMA_VERSION` appears nowhere outside `app/db/schema.py`: no code compares the DB's recorded version to what the running code expects, and `migrate()` only applies missing migrations. This was **executed, not inferred** — a detached `v0.1.0` worktree was run against a copy of the live database (28 reels / 109 facts / versions 1–9): `migrate()` returned 5 and applied nothing, `keyword_search` found the right rows before and after, and an old-code `UPDATE` wrote through the v9 triggers and persisted, with the shadow table left consistent. **So v0.1.0 does not choke on this schema — it quietly accepts it.** What it cannot do is *process* the non-video rows: `v0.1.0`'s `STAGES` is the video chain with no `stages_for_kind`, so enqueueing a paper/article row runs `media` against something with no media, and it has no document spans to extract from. With today's library that is 6 rows (3 papers, 1 article, 1 x_post, 1 image_post) left unprocessable rather than erroring — which is worse, because nothing tells you. A runnable v0.1 fallback needs a v0.1-era database copy, not just a `git checkout v0.1.0`.
 
@@ -335,9 +335,19 @@ Recommended v0.1 extraction shape:
 - Unparseable or ambiguous dates are retained as text or flagged for review; they are not silently invented.
 - Since v0.2.0 the parser enforces the two rules above rather than relying on the prompt:
   `best_deadline` reads a date only out of an **evidence quote**, so the model's own normalized
-  value can no longer set `deadline_iso` when its quote does not state one, and a numeric run
-  that abuts a word naming elapsed time (`3.5 days`, `1-2 weeks`, `5.4 times a week`) is
-  refused rather than read as a date.
+  value can no longer set `deadline_iso` when its quote does not state one; a numeric run that
+  abuts a word naming elapsed time or a clock (`3.5 days`, `1-2 weeks`, `5.4 times a week`,
+  `may 11pm`) is refused rather than read as a date; and a day must be a whole number, so a
+  decimal never supplies one (`may 11.5pm`, `v2.5 march`, `3.15 september` stay text — the last
+  two matter because version and section numbers are what the paper and article sources state
+  constantly).
+- **The year-plausibility rejection is terminal, by measurement and not by accident.** Letting a
+  rejected numeric parse fall through to the month-name branch recovers reel 29's
+  `INVOICE 4500 DUE 15 SEPTEMBER` (2026-09-15) and invents `2027-08-02` out of
+  `arXiv:1706.03762v7 [cs.CL] 2 Aug 2023`, a stamp every paper row carries — 6 corpus parses
+  become 8, one real and one fabricated. `test_the_year_window_rejection_is_terminal_rather_than_passed_on`
+  pins both lines; re-opening this needs the same two numbers, not a prose argument
+  (`docs/EVAL.md`, October 10 after the tag).
 - Reminder/push behavior remains frozen. Its stated condition — "until deadline extraction is evaluated on real data" — **cannot be met by more evaluation**: the live library contains no deadline content to evaluate. Re-measured on October 10, 2026 on the shipped parser: **1 of 28** reels produces at least one hint-bearing candidate sentence (reel 8's prompt-leak line, which states no date), **none of them parses**, and `deadline_iso` is 0 rows. The `due` cue was shipped as the bigram `due date`, so it widens this scan not at all on this library — the 1-of-28 figure is the same as before the cue was added; see the 2026-10-10 section of `docs/EVAL.md` for why, and for the `due 12/09` recall cost that choice accepts. Reel 29's `INVOICE 4500 DUE 15 SEPTEMBER` is not even a scan candidate under that hint list; fed to the parser directly it also yields nothing, because dateutil reads `4500` as the year and the plausibility window rejects the line before the month-name branch can read `15 SEPTEMBER`. See the 2026-09-25 and 2026-10-10 sections of `docs/EVAL.md`. Lifting this freeze is an owner decision about intent, not a pending measurement.
 
 ### STT and OCR

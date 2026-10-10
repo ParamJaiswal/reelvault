@@ -68,10 +68,20 @@ _ELAPSED_UNIT = (r"(?!\s*(?:a\.?m\.?|p\.?m\.?|o'?clock|seconds?|secs|minutes?|mi
 _MONTH_TOKEN_ABBR = _MONTH_TOKEN + r"\.?"
 # `_ELAPSED_UNIT` sits on the month-then-day position only. On the day-then-month position it
 # would be inert: that alternative demands a month token straight after the day, and no month
-# name is in the unit list. `deadline may 11pm` states an hour, not the 11th.
+# name is in the unit list. `deadline may 11pm` states an hour, not the 11th. A day also has to
+# be a whole number, and `(?!\d)` stops digits but not a decimal point: `(?!\.\d)` on the
+# month-then-day position and `(?<!\d\.)` on the day-then-month one refuse a decimal's two
+# halves in turn. Without them `may 11.5pm`, `june 12.30pm` and `august 9.30am` came back as a
+# day wearing a time of day at 0.85, and `v2.5 march release`, `3.15 september` and
+# `deadline 2.5april` read a version, a section and a ratio as a date. Which guard belongs where
+# was settled by removing each guard site and re-running the tests; the same guard on the other
+# position measured inert, so it is not there. What this does not reach is a decimal rescued by a
+# hint word through the bare-pair clause: `deadline 11.5 may` -> 2027-05-11, the
+# hint-riding-number residual named in docs/EVAL.md.
 _MONTH_DAY_ADJACENT = re.compile(
-    rf"(?<![:\d])\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?{_MONTH_TOKEN_ABBR}"
-    + rf"|{_MONTH_TOKEN_ABBR}\s+(?<![:\d])\d{{1,2}}" + _ELAPSED_UNIT + r"(?!\d)(?!:)", re.I)
+    rf"(?<![:\d])(?<!\d\.)\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?{_MONTH_TOKEN_ABBR}"
+    + rf"|{_MONTH_TOKEN_ABBR}\s+(?<![:\d])\d{{1,2}}" + _ELAPSED_UNIT
+    + r"(?!\d)(?!\.\d)(?!:)", re.I)
 # OCR collapses word boundaries, so a real date arrives as `August25,2026` or
 # `DUE15SEPTEMBER`, where a word boundary needs a non-word character and the month's own
 # first digit is one. This is the only relaxation, and it stays a *pair* rule — month
@@ -80,8 +90,8 @@ _MONTH_DAY_ADJACENT = re.compile(
 # invent August 5. A 4-digit run still supplies no day.
 _GLUED_MONTH_DAY = re.compile(
     rf"(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])(?<!\d)\d{{1,2}}" + _ELAPSED_UNIT
-    + rf"(?!\d)(?!:)"
-    rf"|(?<![:\d])\d{{1,2}}(?!\d)(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])", re.I)
+    + rf"(?!\d)(?!\.\d)(?!:)"
+    + rf"|(?<![:\d])(?<!\d\.)\d{{1,2}}(?!\d)(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])", re.I)
 # `[MM:SS]` and `[MM:SS] OCR:` are what the pipeline itself writes in front of every
 # transcript and OCR line (the `transcript` and `overlay` builders in
 # `app/pipeline/stages.py`), so they reach this parser
@@ -215,9 +225,9 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
         # vocabulary stops "6 separate steps" from cutting `sep` out of `separate`, which
         # the old `[A-Za-z]{3,9}` plus a 3-letter prefix lookup read as September 6.
         m = re.search(
-            rf"(?<![:\d])(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_TOKEN})\.?"
+            rf"(?<![:\d])(?<!\d\.)(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_TOKEN})\.?"
             + rf"|({_MONTH_TOKEN})\.?\s+(?<![:\d])(\d{{1,2}})(?:st|nd|rd|th)?"
-            + _ELAPSED_UNIT + r"(?!\d)(?!:)",
+            + _ELAPSED_UNIT + r"(?!\d)(?!\.\d)(?!:)",
             raw, re.I)
         month = day = None
         if m:
