@@ -24,32 +24,67 @@ MONTH_ALIASES = {"sept": 9, "sep": 9, "jan": 1, "feb": 2, "mar": 3, "apr": 4,
 # dateutil is called with `fuzzy=True, default=today`, so it fills in every field the
 # text left out: a bare year came back as a real date carrying today's month and day,
 # and a bare month came back carrying today's day — both at confidence 0.85, with a
-# reminder. Trust the numeric path only when the text states a day *and* a month, since
-# those are the two fields dateutil would otherwise invent. §8 keeps an ambiguous date
-# as text.
+# reminder. Trust the numeric path only when the text states a day *next to* a month,
+# since those are the two fields dateutil would otherwise invent. §8 keeps an ambiguous
+# date as text.
 _MONTH_ALT = "|".join(sorted({*MONTHS, *MONTH_ALIASES}, key=lambda w: (-len(w), w)))
 # Letter-bounded month token, used by the month-name branch below. A month is a month
 # only when letters do not continue it, so `separate` supplies no `sep`.
 _MONTH_TOKEN = rf"(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])"
-_MONTH_WORD = re.compile(rf"\b(?:{_MONTH_ALT})\b", re.I)
-# `\b` is what stops "2026" from supplying the day 20, and it must stay a word boundary
-# rather than a digit-only guard: `20rs`, `11pm` and `August25` all adjoin a letter, and
-# only the glued pair below may read those as a day. The colon guards keep a clock token
-# out of both roles — `12:30` states minutes, not a day — which is what let
-# "deadline 12:30 in june" come back 2027-06-09T12:30, the month from `june`, the day
-# from `today`, the hour from a clock.
-_STATED_DAY = re.compile(r"(?<!:)\b\d{1,2}(?:st|nd|rd|th)?\b(?!:)")
+# A run of numbers that runs straight into a word naming elapsed time, or into a clock suffix,
+# is not a date. Every numeric clause needs it, because every one was measured inventing dates
+# out of durations: "deadline 2029 in 1-2 days" -> 2029-02-01 and "deadline 3.5 days" through
+# the pair, "3 5 20 minutes apart" -> 2027-05-03T00:20 through the spaced triple,
+# "takes 1-2-2026 weeks" through the separated triple, and "the store closes 5.4 times a week"
+# -> the 5th of whatever month the scan runs in. The clock suffixes are here for the month-name
+# day position: `deadline may 11pm` states an hour, and both the adjacency gate and the
+# month-name branch used to read it as May 11. `march` is deliberately absent from the list —
+# `March` is a month, and a number before a month name is a date (`closes 3.4 march` parses at
+# 2027-03-03, and `closes 12-13 march` returns None under every revision so it proves nothing).
+# The singular abbreviations are deliberately absent too: `sec` is a section and `min` is a
+# minimum, both constant in the papers and articles v0.2.0 ingests, and with the optional `s`
+# the list swallowed the date in `deadline 12/09 Sec.` — which is pinned, because a review pass
+# that reached for `deadline 15/09/2026 sec 3` and `last date 12/09 min 500` as the same class
+# found both returning text under either spelling, dateutil rejecting them for its own reasons. The
+# compiles carrying this get `re.I`: this library's OCR is uppercase, and without it
+# `DEADLINE 3.5 DAYS`, `CLOSES IN 2-3 WEEKS` and `3 5 20 MINUTES APART` all still parsed, which
+# is the exact set of inventions the rule exists to refuse. What the span cannot reach is a
+# number separated from its unit by punctuation other than a space — `deadline may 11.5pm`
+# still yields a day from `today` — recorded in docs/EVAL.md rather than patched here.
+_ELAPSED_UNIT = (r"(?!\s*(?:a\.?m\.?|p\.?m\.?|o'?clock|seconds?|secs|minutes?|mins|"
+                 r"hours?|hrs?|days?|weeks?|months?|years?|times?)\b)")
+# A month name is date evidence only when it sits next to the day it dates. Accepting a
+# month word anywhere plus a standalone number anywhere is what read
+# `[11] There may be some very unworldly people` as May 11 at 0.85: `may` is in the month
+# vocabulary and a bracketed list index is a standalone number, and those two sentences
+# were the last inventions of the family left in the stored corpus. Distance cannot
+# separate the classes — the smallest month-to-day gap measured is 4 characters for a real
+# date and 4 for a fabrication — so the rule is lexical: the two abut, allowing an ordinal
+# suffix, one `of`, and the period that abbreviations carry (`Sept. 15`, `Oct. 5, 2026` —
+# a form the pre-adjacency rule read fine, so the dot is not optional or the gate is
+# narrower than the branch it feeds). The colon and digit guards carry the same clock refusal
+# that branch 2 applies. `August25` is deliberately not matched here; OCR-collapsed dates are
+# the glued rule's job, since a month and a day with nothing between them are still a date.
+_MONTH_TOKEN_ABBR = _MONTH_TOKEN + r"\.?"
+# `_ELAPSED_UNIT` sits on the month-then-day position only. On the day-then-month position it
+# would be inert: that alternative demands a month token straight after the day, and no month
+# name is in the unit list. `deadline may 11pm` states an hour, not the 11th.
+_MONTH_DAY_ADJACENT = re.compile(
+    rf"(?<![:\d])\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?{_MONTH_TOKEN_ABBR}"
+    + rf"|{_MONTH_TOKEN_ABBR}\s+(?<![:\d])\d{{1,2}}" + _ELAPSED_UNIT + r"(?!\d)(?!:)", re.I)
 # OCR collapses word boundaries, so a real date arrives as `August25,2026` or
-# `DUE15SEPTEMBER`, where the two `\b` rules above both fail: `\b` needs a non-word
-# character, and the month's own first digit is one. This is the only relaxation, and it
-# stays a *pair* rule — month directly abutting day, either order — because widening the
-# two independent tests instead is what let `may` plus `11pm` invent May 9 at 0.85, and
-# let `August2026 … closes 5` invent August 5. A 4-digit run still supplies no day.
+# `DUE15SEPTEMBER`, where a word boundary needs a non-word character and the month's own
+# first digit is one. This is the only relaxation, and it stays a *pair* rule — month
+# directly abutting day, either order — because widening the two independent tests instead
+# is what let `may` plus `11pm` invent May 9 at 0.85, and let `August2026 … closes 5`
+# invent August 5. A 4-digit run still supplies no day.
 _GLUED_MONTH_DAY = re.compile(
-    rf"(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])(?<!\d)\d{{1,2}}(?!\d)(?!:)"
+    rf"(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])(?<!\d)\d{{1,2}}" + _ELAPSED_UNIT
+    + rf"(?!\d)(?!:)"
     rf"|(?<![:\d])\d{{1,2}}(?!\d)(?<![a-zA-Z])(?:{_MONTH_ALT})(?![a-zA-Z])", re.I)
 # `[MM:SS]` and `[MM:SS] OCR:` are what the pipeline itself writes in front of every
-# transcript and OCR line (`app/pipeline/stages.py:381-382`), so they reach this parser
+# transcript and OCR line (the `transcript` and `overlay` builders in
+# `app/pipeline/stages.py`), so they reach this parser
 # twice over: inside a rules-fallback candidate, and inside a model quote kept verbatim
 # from a prefixed span. dateutil reads them as a clock and puts that hour on the stored
 # deadline. Only our own marker, and only at line start — a time written in the source
@@ -60,9 +95,9 @@ _LINE_MARKER = re.compile(r"(?:^|\n)\[\d{1,2}:\d{2}\](?:\s*OCR:)?[ \t]*")
 # triple backreferences its own separator — letting either slot be any of `/.-` admitted
 # "ROUND 1/4 - 40s WORK" as a date, measured on the corpus.
 _YEAR_BEARING_SHAPE = re.compile(
-    r"\b\d{1,2}\s+\d{1,2}\s+\d{2,4}\b"                    # 15 09 2026, 15 09 26
-    r"|(?<!\d)\d{1,2}([/.-])\s*\d{1,2}\s*\1\s*\d{2,4}(?!\d)"   # 15/09/2026, 12-09-26, 3.9.26
-    r"|(?<!\d)\d{8}(?!\d)")                               # 20261015, form screenshots
+    r"\b\d{1,2}\s+\d{1,2}\s+\d{2,4}\b" + _ELAPSED_UNIT    # 15 09 2026, 15 09 26
+    + r"|(?<!\d)\d{1,2}([/.-])\s*\d{1,2}\s*\1\s*\d{2,4}(?!\d)" + _ELAPSED_UNIT  # 15/09/26
+    + r"|(?<!\d)\d{8}(?!\d)", re.I)                        # 20261015, form screenshots
 # A bare pair, on its own, says nothing: `5.9` is a date and so is `3.5 days`,
 # `GLM-5.2`, `4.92 25.7`, `03/07` and `1/4`. Screening the stored corpus found 24
 # sentences whose only numeric evidence is a pair, every one of them a section number,
@@ -77,7 +112,8 @@ _YEAR_BEARING_SHAPE = re.compile(
 # unit, and dateutil turns `5.30` into a day-and-month with the day from `today`. The
 # LEFT edge stays digit-only, because OCR glues a collapsed label to the date it
 # precedes — `LAST DATE12/09` states a real pair and must survive.
-_PAIR_SHAPE = re.compile(r"(?<!\d)\d{1,2}\s*[/.-]\s*\d{1,2}(?![\da-zA-Z])")  # 15/09, 5.9
+_PAIR_SHAPE = re.compile(
+    r"(?<!\d)\d{1,2}\s*[/.-]\s*\d{1,2}(?![\da-zA-Z])" + _ELAPSED_UNIT, re.I)  # 15/09, 5.9
 
 
 def _states_day_and_month(text: str) -> bool:
@@ -85,11 +121,23 @@ def _states_day_and_month(text: str) -> bool:
         return True
     if _PAIR_SHAPE.search(text) and any(h in text.lower() for h in DEADLINE_HINTS):
         return True
-    return bool(_MONTH_WORD.search(text) and _STATED_DAY.search(text))
+    return bool(_MONTH_DAY_ADJACENT.search(text))
 
+# `"due"` as a bare word was the owner's decision, and as written it is ordinary prose in the
+# two sources v0.2.0 ingests. Hint words do double duty — they select sentences for the rules
+# scan *and* rescue a bare numeric pair — and used as pair evidence `due` invented a confident
+# dated reminder out of each of: `Due to the 3.2% increase in volume, the invoice is
+# unchanged.` -> 2026-09-03, `Balance due of 4.5 is shown in table 2.` -> 2027-02-04,
+# `Due to demand, GLM 5.2 shipped.` -> 2026-09-05, `no amount due 03/07 remains` ->
+# 2027-07-03, `Due to the 1-2 gap in the series` -> 2027-02-01. None of those are visible in
+# the stored corpus, which has 0 of its 2,638 sentences putting `due` beside a pair, so
+# "adds 0" there was luck rather than evidence. What is admitted instead is the bigram
+# `due date`, which states a deadline and nothing else: `due date 12/09` parses, `due 12/09`
+# stays text, and every `due` form that states a shape still parses regardless — `due 15
+# September`, `due 15/09/2026`, `DUE15SEPTEMBER`.
 DEADLINE_HINTS = ("deadline", "last date", "apply before", "apply by",
                   "register by", "register before", "closes on", "closes",
-                  "submit before")
+                  "submit before", "due date")
 
 
 @dataclass
@@ -167,8 +215,9 @@ def parse_deadline(raw: str, *, today: datetime | None = None,
         # vocabulary stops "6 separate steps" from cutting `sep` out of `separate`, which
         # the old `[A-Za-z]{3,9}` plus a 3-letter prefix lookup read as September 6.
         m = re.search(
-            rf"(?<![:\d])(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_TOKEN})|"
-            rf"({_MONTH_TOKEN})\s+(?<![:\d])(\d{{1,2}})(?:st|nd|rd|th)?(?!\d)(?!:)",
+            rf"(?<![:\d])(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_TOKEN})\.?"
+            + rf"|({_MONTH_TOKEN})\.?\s+(?<![:\d])(\d{{1,2}})(?:st|nd|rd|th)?"
+            + _ELAPSED_UNIT + r"(?!\d)(?!:)",
             raw, re.I)
         month = day = None
         if m:
@@ -246,11 +295,13 @@ def best_deadline(facts: list[dict], unified_text: str,
                   today: datetime | None = None) -> Deadline | None:
     """Pick the highest-confidence parseable deadline among facts + text.
 
-    A date parseable from the evidence quote is fully trusted and keeps
-    the normal parse confidence (boosted by the fact's own confidence).
-    B4: when the quote yields no date but the fact's normalized value
-    does, the value is parsed anyway at reduced confidence (0.5) instead
-    of being dropped.
+    Only an evidence quote can carry a date. §8 lets the model propose `date_text` but
+    never lets model output determine a normalized deadline, so a fact whose quote holds
+    no date produces no deadline even when the model's own `value` parses cleanly. B4
+    (`7130b4c`) used to parse that value anyway at 0.5 so valid deadlines were not
+    dropped; the owner reversed it on 2026-10-10. A date the model quoted badly is still
+    found, but through the rules path below, which reads the source text rather than the
+    model — and the quote reaching here is already ledger-verified against that text.
     """
     best: Deadline | None = None
 
@@ -271,11 +322,6 @@ def best_deadline(facts: list[dict], unified_text: str,
                     d.confidence = max(d.confidence,
                                        f.get("confidence", 0.5))
                     consider(d)
-                    continue
-            d = parse_deadline(val, today=today, source=source)
-            if d.date:
-                d.confidence = 0.5   # value-only parse: not corroborated
-                consider(d)
     if best is None:
         for cand in extract_deadline_candidates(unified_text or ""):
             consider(parse_deadline(cand, today=today, source="rules"))

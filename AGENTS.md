@@ -1,15 +1,16 @@
 ## ReelVault — Agent Guidance
 
-**Last updated:** October 5, 2026  
-**Active milestone:** v2 multi-source ingestion on `v2-hybrid-routing`, which is ahead of
-`main` with `main` fully contained (`git rev-list --count main..HEAD` for the number,
-`git merge-base --is-ancestor main HEAD` for the fast-forward claim — do not quote a
-count here, the next commit invalidates it). `main` is still `v0.1.0` (`b8b0533`,
-tagged, frozen). See `docs/INGESTION.md` for the v2 sources.
+**Last updated:** October 10, 2026  
+**Active milestone:** v0.2.0 — v2 multi-source ingestion. The release *is* `v2-hybrid-routing`
+fast-forwarded into `main` and tagged `v0.2.0`, so `main` and the branch are meant to name the
+same commit; verify rather than trust this line (`git merge-base --is-ancestor
+v2-hybrid-routing main`, and `git rev-list --count main..v2-hybrid-routing` for any lead — do
+not quote either here, the next commit invalidates a count). The frozen v0.1 line is tag
+`v0.1.0` (`b8b0533`). See `docs/INGESTION.md` for the v2 sources.
 
-The v0.1 merge rule still holds: **every v2 merge must keep the v0.1 suite green**, `content_kind` defaults to `video` and `RV_LLM_BACKEND` defaults to local, so v0.1 behaviour is preserved by construction. Both were re-verified on October 5, 2026 (386 passed / 3 skipped / 1 xfailed; the v0.1 phase-gate files alone are 31 passed / 1 skipped).
+The v0.1 merge rule still holds: **every v2 merge must keep the v0.1 suite green**, `content_kind` defaults to `video` and `RV_LLM_BACKEND` defaults to local, so v0.1 behaviour is preserved by construction. Both were re-verified on October 10, 2026 at the v0.2.0 merge (469 passed / 3 skipped / 0 xfailed; the v0.1 phase-gate files alone are 31 passed / 1 skipped).
 
-**What merging v2 does to rollback — know this before you do it.** `main` is schema v5, this branch is v9, and `SCHEMA_VERSION` appears nowhere outside `app/db/schema.py`: no code compares the DB's recorded version to what the running code expects, and `migrate()` only applies missing migrations. This was **executed, not inferred** — a detached `main` worktree was run against a copy of the live database (28 reels / 109 facts / versions 1–9): `migrate()` returned 5 and applied nothing, `keyword_search` found the right rows before and after, and an old-code `UPDATE` wrote through the v9 triggers and persisted, with the shadow table left consistent. **So v0.1.0 does not choke on this schema — it quietly accepts it.** What it cannot do is *process* the non-video rows: `main`'s `STAGES` is the video chain with no `stages_for_kind`, so enqueueing a paper/article row runs `media` against something with no media, and `main` has no document spans to extract from. A rollback therefore leaves 6 rows unprocessable rather than erroring — which is worse, because nothing tells you. A runnable v0.1 fallback needs a v0.1-era database copy, not just a `git checkout`.
+**What the v2 schema does to a v0.1 rollback — know this before you do one.** The v0.1 code is schema v5 and the current code is v9, and `SCHEMA_VERSION` appears nowhere outside `app/db/schema.py`: no code compares the DB's recorded version to what the running code expects, and `migrate()` only applies missing migrations. This was **executed, not inferred** — a detached `v0.1.0` worktree was run against a copy of the live database (28 reels / 109 facts / versions 1–9): `migrate()` returned 5 and applied nothing, `keyword_search` found the right rows before and after, and an old-code `UPDATE` wrote through the v9 triggers and persisted, with the shadow table left consistent. **So v0.1.0 does not choke on this schema — it quietly accepts it.** What it cannot do is *process* the non-video rows: `v0.1.0`'s `STAGES` is the video chain with no `stages_for_kind`, so enqueueing a paper/article row runs `media` against something with no media, and it has no document spans to extract from. With today's library that is 6 rows (3 papers, 1 article, 1 x_post, 1 image_post) left unprocessable rather than erroring — which is worse, because nothing tells you. A runnable v0.1 fallback needs a v0.1-era database copy, not just a `git checkout v0.1.0`.
 
 Read this file before changing code. Then read `docs/SESSION_HANDOFF.md` for the latest verified session state.
 
@@ -116,12 +117,12 @@ Do not replace these with a simpler alternative merely to reduce code. Fix scope
 
 ### Explicitly frozen — each needs the owner's explicit authorization
 
-Do not delete these components. Do not add features to them unless the active session explicitly authorizes it. The v0.1 validation that originally gated this list is complete (`docs/V0_RETROSPECTIVE.md`); what follows stays frozen by decision, not by pending work. Every line was re-checked against `git rev-list main..v2-hybrid-routing -- <path>` on October 5, 2026, and the counts are the evidence for the claim.
+Do not delete these components. Do not add features to them unless the active session explicitly authorizes it. The v0.1 validation that originally gated this list is complete (`docs/V0_RETROSPECTIVE.md`); what follows stays frozen by decision, not by pending work. Every line was re-checked against `git rev-list main..v2-hybrid-routing -- <path>` on October 5, 2026, and the counts are the evidence for the claim. **After the v0.2.0 merge that range is empty**, because `main` and the branch are the same commit — re-check the freeze with `git rev-list --count v0.1.0..HEAD -- <path>` instead, and note that as of October 10, 2026 every `0 commits` claim below still holds against that range.
 
 - Android: **no longer frozen — already built and contract-tested.** `4ea22cb` (APK builds + PDF/image share end-to-end), `bc0c16b` (HTTP contract tests pinning the APK's paths + emulator verification), `0bcf823` (contract tests hardened from review). APK release and further Android *feature* work still need authorization.
 - Docker build/debug/deployment work — `Dockerfile`: 0 commits in the v2 range.
 - Web Push expansion or phone push verification — `app/core/push.py`: 0 commits. (Reminder/push stays frozen; see §8 for why the deadline measurement does not lift it.)
-- Deadline parser *policy* — `app/knowledge/deadlines.py` is open for correctness (the year window, the day-and-month gate and the month-vocabulary fix all landed here), but three decisions are the owner's, not a session's: adding `"due"` to `DEADLINE_HINTS`, reversing the B4 value-only fallback that lets an uncorroborated model value set `deadline_iso` at 0.5, and the duration-vs-range `xfail` in `tests/test_deadline_parsing.py`.
+- Deadline parser *policy* — `app/knowledge/deadlines.py` stays open for correctness (the year window, the day-and-month gate and the month-vocabulary fix all landed here). The four decisions that were the owner's, not a session's, were **taken on 2026-10-10 and shipped in v0.2.0**: a `due` cue added to `DEADLINE_HINTS` — **shipped as the bigram `"due date"`, a deliberate deviation**, because as pair evidence bare `due` invented dates out of ordinary invoice and paper prose (`Due to the 3.2% increase…` → 2026-09-03, `no amount due 03/07 remains` → 2027-07-03) and the corpus screen could not see any of them; the B4 value-only fallback reversed (an unevidenced model value can no longer set `deadline_iso`); the duration-vs-range `xfail` resolved as a general "a number run abutting a word naming elapsed time or a clock is not a date" rule, applied to the numeric shapes *and* the month-name day positions; and month-name evidence required to *abut* the day rather than merely coexist with a number. Measurement for all four, the per-rule reversion counts and the eight-mutation battery are in `docs/EVAL.md` (October 10). Accepted recall costs: two real word orders that no longer touch, and `due 12/09`.
 - Playwright/Instagram login-fallback expansion — `app/pipeline/fetch.py`: 0 commits.
 - Custom Business-SLM training, routing, or fine-tuning — `vendor/slm`: 0 commits.
 - New auth features, roles, invitations, or OAuth — `app/core/auth.py`: 0 commits.
@@ -332,7 +333,12 @@ Recommended v0.1 extraction shape:
 - The model may extract `date_text` only.
 - Deterministic application logic parses and normalizes dates.
 - Unparseable or ambiguous dates are retained as text or flagged for review; they are not silently invented.
-- Reminder/push behavior remains frozen. Its stated condition — "until deadline extraction is evaluated on real data" — **cannot be met by more evaluation**: measured on October 5, 2026, the live library contains no deadline content at all (1 of 28 reels produces a hint sentence and it holds no date; 4 state a date and none carries a hint word; `deadline_iso` is 0 rows). See the 2026-09-25 section of `docs/EVAL.md`. Lifting this freeze is now an owner decision about intent, not a pending measurement.
+- Since v0.2.0 the parser enforces the two rules above rather than relying on the prompt:
+  `best_deadline` reads a date only out of an **evidence quote**, so the model's own normalized
+  value can no longer set `deadline_iso` when its quote does not state one, and a numeric run
+  that abuts a word naming elapsed time (`3.5 days`, `1-2 weeks`, `5.4 times a week`) is
+  refused rather than read as a date.
+- Reminder/push behavior remains frozen. Its stated condition — "until deadline extraction is evaluated on real data" — **cannot be met by more evaluation**: the live library contains no deadline content to evaluate. Re-measured on October 10, 2026 on the shipped parser: **1 of 28** reels produces at least one hint-bearing candidate sentence (reel 8's prompt-leak line, which states no date), **none of them parses**, and `deadline_iso` is 0 rows. The `due` cue was shipped as the bigram `due date`, so it widens this scan not at all on this library — the 1-of-28 figure is the same as before the cue was added; see the 2026-10-10 section of `docs/EVAL.md` for why, and for the `due 12/09` recall cost that choice accepts. Reel 29's `INVOICE 4500 DUE 15 SEPTEMBER` is not even a scan candidate under that hint list; fed to the parser directly it also yields nothing, because dateutil reads `4500` as the year and the plausibility window rejects the line before the month-name branch can read `15 SEPTEMBER`. See the 2026-09-25 and 2026-10-10 sections of `docs/EVAL.md`. Lifting this freeze is an owner decision about intent, not a pending measurement.
 
 ### STT and OCR
 

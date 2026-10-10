@@ -325,6 +325,11 @@ class TestStageFlow:
                             lambda facts, text: original(facts, text, today=today))
         replies = iter([
             json.dumps({"categories": ["Educational"], "primary_schema": "education"}),
+            # Deliberately the wrong key: the stage reads `extraction["facts"]`, so this entry
+            # creates no fact and cannot be what satisfies the assertion below. The date arrives
+            # through `best_deadline`'s rules path, which scans the source text — that is the
+            # fallback this test is named for. The corrected shape, with the fact asserted to
+            # persist, is in test_the_models_own_normalized_date_is_not_a_deadline.
             json.dumps({"deadline": [entry]}),
         ])
         llm = FakeLLM("")
@@ -385,10 +390,12 @@ class TestStageFlow:
             (9.0, "the deadline is 2029"),          # bare year
             (10.0, "CLOSES OCT 5"),                 # the one real date
         ]
-        entry = {"value": "june", "quote": "deadline in june"}
         replies = iter([
             json.dumps({"categories": ["Education"], "primary_schema": "education"}),
-            json.dumps({"deadline": [entry]}),
+            json.dumps({"summary": "A course deadline is shown on screen.",
+                        "key_takeaways": [], "action_items": [], "entities": [],
+                        "facts": [{"field": "deadline", "value": "june",
+                                   "quote": "deadline in june"}]}),
         ])
         llm = FakeLLM("")
         monkeypatch.setattr(llm, "chat", lambda *args, **kwargs: next(replies))
@@ -410,11 +417,110 @@ class TestStageFlow:
         expected = deadlines.parse_deadline("CLOSES OCT 5", today=today).date.date()
         assert row["deadline_raw"] and "CLOSES OCT 5" in row["deadline_raw"]
         assert datetime.fromisoformat(row["deadline_iso"]).date() == expected
+        # The fact above must actually reach the ledger, or this test would be proving the
+        # rules path alone while claiming to prove the boosted fact path too.
+        with get_db() as db:
+            kept = [r[0] for r in db.execute(
+                "SELECT evidence_quote FROM facts WHERE reel_id=?", (rid,))]
+        assert "deadline in june" in kept
         # Nothing above `CLOSES OCT 5` may have been invented: every bad shape parses to
         # None now, and a regression would show up as a different stored date, not as a
         # NULL (the positive control holds that up).
         assert datetime.fromisoformat(row["reminder_iso"]) <= datetime.fromisoformat(
             row["deadline_iso"])
+
+    def test_a_deadline_the_source_cannot_be_read_as_a_date_leaves_the_columns_null(
+            self, tmp_db, monkeypatch, sample_user):
+        """The adjacency ceiling, at the stage rather than in the parser. One reel, one OCR
+        line, one fact citing it verbatim — the evidence is real and the date really is in
+        the text, just written so that the month and the day do not touch. Under the rules
+        this replaces that line parsed from its own quote at 0.85 and stored `2026-10-30`
+        with a reminder attached. Now all three columns are NULL, which is §8's answer: keep
+        it as text for the user to correct rather than fire on a guess. The fact must still
+        persist, because a dropped fact would pass this test for the wrong reason."""
+        from datetime import datetime
+
+        from app.knowledge import deadlines
+        from app.pipeline import stages
+
+        today = datetime(2026, 9, 9)
+        line = "the deadline is the 30th of next month, in October"
+        replies = iter([
+            json.dumps({"categories": ["Education"], "primary_schema": "education"}),
+            json.dumps({"summary": "A deadline is stated in words the parser will not read.",
+                        "key_takeaways": [], "action_items": [], "entities": [],
+                        "facts": [{"field": "deadline", "value": "30th of next month",
+                                   "quote": line}]}),
+        ])
+        llm = FakeLLM("")
+        monkeypatch.setattr(llm, "chat", lambda *args, **kwargs: next(replies))
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: llm)
+        original = deadlines.best_deadline
+        monkeypatch.setattr(deadlines, "best_deadline",
+                            lambda facts, text: original(facts, text, today=today))
+
+        rid = mk_reel(sample_user, shortcode="DLceiling")
+        with get_db() as db:
+            db.execute("INSERT INTO ocr_results(reel_id, t_s, text, conf)"
+                       " VALUES (?,?,?,?)", (rid, 5.0, line, 1.0))
+        stages.stage_classify_extract(rid, {})
+
+        with get_db() as db:
+            row = dict(db.execute("SELECT deadline_iso, reminder_iso, deadline_raw"
+                                  " FROM reels WHERE id=?", (rid,)).fetchone())
+        assert row["deadline_iso"] is None and row["deadline_raw"] is None
+        assert row["reminder_iso"] is None
+        # The evidence itself survives, so the user still sees what the reel said.
+        with get_db() as db:
+            kept = [r[0] for r in db.execute(
+                "SELECT evidence_quote FROM facts WHERE reel_id=?", (rid,))]
+        assert line in kept
+
+    def test_the_models_own_normalized_date_is_not_a_deadline(
+            self, tmp_db, monkeypatch, sample_user):
+        """B4 reversed, and this is the shape that isolates it: the ledger only keeps a fact
+        whose value is supported by its quote, so both strings have to come from the same
+        line. Here the value `October 5` parses on its own while the quoted line does not —
+        `4500` is read as the year and the plausibility window rejects it, the real reel 29
+        OCR shape. The old fallback parsed the value anyway at 0.5 and wrote the column with
+        a reminder; §8 says model output never determines a normalized deadline, so now all
+        three columns are NULL with the fact still stored."""
+        from datetime import datetime
+
+        from app.knowledge import deadlines
+        from app.pipeline import stages
+
+        today = datetime(2026, 9, 9)
+        line = "invoice 4500 due October 5"
+        replies = iter([
+            json.dumps({"categories": ["Education"], "primary_schema": "education"}),
+            json.dumps({"summary": "An invoice shows a due date.",
+                        "key_takeaways": [], "action_items": [], "entities": [],
+                        "facts": [{"field": "due date", "value": "October 5",
+                                   "quote": line}]}),
+        ])
+        llm = FakeLLM("")
+        monkeypatch.setattr(llm, "chat", lambda *args, **kwargs: next(replies))
+        monkeypatch.setattr(stages.providers, "get_llm", lambda: llm)
+        original = deadlines.best_deadline
+        monkeypatch.setattr(deadlines, "best_deadline",
+                            lambda facts, text: original(facts, text, today=today))
+
+        rid = mk_reel(sample_user, shortcode="DLvalueonly")
+        with get_db() as db:
+            db.execute("INSERT INTO ocr_results(reel_id, t_s, text, conf)"
+                       " VALUES (?,?,?,?)", (rid, 6.0, line, 1.0))
+        stages.stage_classify_extract(rid, {})
+
+        with get_db() as db:
+            row = dict(db.execute("SELECT deadline_iso, reminder_iso, deadline_raw"
+                                  " FROM reels WHERE id=?", (rid,)).fetchone())
+            kept = [r[0] for r in db.execute(
+                "SELECT evidence_quote FROM facts WHERE reel_id=?", (rid,))]
+        assert deadlines.parse_deadline("October 5", today=today).date is not None
+        assert row["deadline_iso"] is None and row["deadline_raw"] is None
+        assert row["reminder_iso"] is None
+        assert line in kept
 
     def test_entity_hallucination_is_not_persisted(
             self, tmp_db, monkeypatch, sample_user):

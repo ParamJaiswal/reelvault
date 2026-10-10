@@ -212,11 +212,11 @@ def test_a_digit_glued_to_a_letter_is_not_a_stated_day(text):
 ])
 def test_a_clock_token_does_not_state_a_day(text):
     """`deadline 12:30 in june` returned 2027-06-09T12:30 at confidence 0.85: the month
-    from `june`, the hour from the clock, and the **day from `today`** — because
-    `_STATED_DAY`'s `\b` counted `12` and `30` as standalone numbers and dateutil then
-    filled the field the text never stated. §8's rule is the same one that killed the
-    bare-year case, and the colon guards are what hold it: a number touching a colon
-    states minutes, not a day, in either position."""
+    from `june`, the hour from the clock, and the **day from `today`** — because the gate's
+    day test used to count `12` and `30` as standalone numbers and dateutil then filled the
+    field the text never stated. §8's rule is the same one that killed the bare-year case, and
+    the colon guards are what hold it: a number touching a colon states minutes, not a day, in
+    either position."""
     assert parse_deadline(text, today=TODAY).date is None
 
 
@@ -333,22 +333,147 @@ def test_an_impossible_date_is_kept_as_text_instead_of_raising(text):
     assert "unparseable" in d.note
 
 
-@pytest.mark.xfail(reason="residual, recorded in docs/EVAL.md. Four shapes still invent a "
-                          "date, and the pair gate admits every one of them for a reason it "
-                          "is built to trust: a duration ('deadline 2029 in 1-2 days' -> "
-                          "2029-02-01, a range read as a day-month pair); a deadline hint "
-                          "riding on an unrelated numeric, where the number gives the day and "
-                          "`today` gives the month, so 'the store closes 5.4 times a week' is "
-                          "the 5th of whatever month the scan runs in; the spaced triple, "
-                          "whose third component is shape evidence and not proof "
-                          "('3 5 20 minutes apart' -> 2027-05-03 00:20); and `may`, both a "
-                          "month name and the commonest modal in this corpus, paired with any "
-                          "standalone number ('[11] There may be some very unworldly people' "
-                          "-> May 11 — 2 such sentences survive the full corpus screen). All "
-                          "four need sense or position awareness rather than a wider regex, "
-                          "and all four predate the pair gate.", strict=False)
-def test_a_duration_is_not_a_day_and_month_pair():
-    assert parse_deadline("deadline 2029 in 1-2 days", today=TODAY).date is None
+@pytest.mark.parametrize("text", [
+    "deadline 2029 in 1-2 days",           # a span of days, not a day and a month
+    "deadline 3.5 days",
+    "closes in 2-3 weeks",
+    "the store closes 5.4 times a week",   # a frequency, and `closes` is a hint
+    "the store closes 5.4 time a week",    # the same word singular: the list is `times?`
+    "deadline 3.5 secs",                   # the plural abbreviations stay refused…
+    "deadline 5.9 mins",                   # …and the singular ones are deliberately absent
+    "3 5 20 minutes apart",                # the spaced triple, read as a date until now
+    "takes 1-2-2026 weeks",                # the separated triple, same reason
+    # The same five in the case this library's OCR actually arrives in. The unit lookahead
+    # sits in patterns compiled without re.I, so uppercase is not a formatting nit: every one
+    # of these still parsed when the rule was written lowercase-only.
+    "DEADLINE 3.5 DAYS", "CLOSES IN 2-3 WEEKS", "THE STORE CLOSES 5.4 TIMES A WEEK",
+    "3 5 20 MINUTES APART",
+])
+def test_a_number_run_before_an_elapsed_time_unit_is_not_a_date(text):
+    """These were the standing residuals in docs/EVAL.md, and they all needed the same thing
+    to notice: the word after the numbers. A hint clause cannot tell `deadline 3.5 days` from
+    `deadline 3.5` — the unit is the only evidence that one is a length of time. Refusing a
+    numeric run that abuts a unit costs no real form, because a month is not in the unit list
+    (`closes 3.4 march` still parses at 2027-03-03, and it is the case that proves the escape,
+    where `closes 12-13 march` returns None under both rules and proves nothing). The residual
+    this leaves is a decimal read as a day *without* a unit after it: `3.5 august deadline` ->
+    2027-08-03, which needs sense about the number rather than a rule about its neighbours."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
+@pytest.mark.parametrize("text", [
+    "Apply by Sept. 15",              # the abbreviation's period is punctuation, not a word
+    "Deadline: Oct. 5, 2026",
+    "register by Nov. 30",
+    "closes Dec. 31",
+    "applications close Oct. 20th",
+    "15 Sept.",                       # and in the other order, with the dot at the end
+])
+def test_a_month_abbreviation_still_abuts_its_day(text):
+    """The first version of the adjacency rule required whitespace straight after the month
+    token, so `Sept. 15` had a dot in the way and stopped parsing — a recall loss against the
+    rule it replaced, on the single most common written form of an abbreviated deadline. Pinned
+    because the corpus cannot show it: no stored sentence uses a dotted abbreviation, which is
+    exactly how this diff shipped it once already.
+
+    The confidence is the assertion, not the date. The month-name branch reads `Sept. 15`
+    whichever way the gate is configured, so `date is not None` passes even when the gate
+    refuses the form; 0.85 is what says dateutil reached it, which is what the rule this
+    replaced did."""
+    d = parse_deadline(text, today=TODAY)
+    assert d.date is not None and d.confidence == pytest.approx(0.85)
+
+
+@pytest.mark.parametrize("text", [
+    "deadline may 11pm",         # an hour after a month word, in both orders
+    "deadline 11pm may",
+    "closes sept 5pm",
+    "deadline may11pm",          # glued, the way an OCR line arrives
+    "june 30mins left",          # a duration, and no hint word to hide behind
+    "DEADLINE MAY 11PM",         # uppercase: the lookahead compiles with re.I
+])
+def test_a_clock_or_unit_after_a_month_name_supplies_no_day(text):
+    r"""The elapsed-unit lookahead started out only on the numeric shapes, and the month-name
+    positions kept reading a clock as a day: `deadline may 11pm` gave 2027-05-11 at 0.85
+    through the adjacency gate and again at 0.75 through the month branch when the gate was
+    closed, because both take `\d{1,2}` and stopped at `(?!\d)`. A day needs the same neighbour
+    check a pair needs."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
+@pytest.mark.parametrize("text", [
+    "deadline 12/09 Sec.",         # `Sec.` is a section, and the pair beside it is the date
+])
+def test_a_section_abbreviation_is_not_an_elapsed_time_unit(text):
+    r"""The unit list is `secs` and `mins`, not `secs?` and `mins?`, and the difference is the
+    two sources v0.2.0 ingests: `sec` is a section and `min` is a minimum, both constant in a
+    paper, while a bare `3.5 sec` duration in deadline text is not. With the optional `s` the
+    list swallowed them, and the review that found it had to point at `deadline 15/09/2026
+    sec 3` to show what the rule was eating — though the honest version of that finding is that
+    dateutil then refuses those two forms for its own reasons (a stray `500` read as a year, a
+    trailing token it cannot parse), so they returned text at HEAD as well. The measurable
+    difference is the pair-plus-abbreviation above, which has to parse and does."""
+    assert parse_deadline(text, today=TODAY).date is not None
+
+
+@pytest.mark.parametrize("text", [
+    "deadline is the 30th of next month, in October",
+    "the deadline is on the 5th, in September",
+    "Apply by the 15th, September 2026",      # the same class, not the same sentence
+    "closes June 2026, on the 30th",
+    "[11] There may be some very unworldly people who do great work without consciously "
+    "trying",
+    "[29] It may be helpful always to walk or run the same route, because that frees "
+    "attention",
+])
+def test_a_month_and_a_day_that_do_not_abut_are_kept_as_text(text):
+    """The ceiling the owner accepted on 2026-10-10, stated as a pair of cases because it
+    closes both an invention and a real date, and pretending otherwise would read as
+    progress. The first are genuine deadlines in word orders the stored library and the golden
+    set never use, so they now stay text for a user to correct in the UI — and they are a
+    *class*, not a list: every month-and-day that does not touch is refused, four instances are
+    pinned here because two were named at adoption and two more turned up when review asked how
+    wide the class actually was. The last two are the inventions, which are the whole reason for
+    the rule — `may` is in the month vocabulary and a bracketed list index is a standalone
+    number, and the two of them were the last dates the corpus screen still found. Nothing that
+    abuts changes: `the 15th of September`, `5th of October` and `October 5th` all still
+    parse."""
+    assert parse_deadline(text, today=TODAY).date is None
+
+
+@pytest.mark.parametrize("text", [
+    "due 15 September",              # `due` selects the sentence; the shape makes the date
+    "due 15/09/2026",
+    "due date 12/09",
+    "DUE15SEPTEMBER",
+    "the last date is September 15",
+])
+def test_due_selects_a_sentence_without_making_a_bare_pair_a_date(text):
+    """Owner decision 2026-10-10 admitted `due` to `DEADLINE_HINTS`, and the hint list does
+    double duty — it selects sentences for the rules scan *and* rescues a bare numeric pair.
+    For `due` only the first is safe: it is ordinary prose in invoices and papers, and as pair
+    evidence it invented a dated reminder out of `Due to the 3.2% increase in volume`,
+    `Balance due of 4.5 is shown in table 2` and `no amount due 03/07 remains` — none of which
+    the corpus screen could see, because none of its 2,638 sentences puts `due` beside a pair.
+    So `due` is a cue, `due date` is a cue strong enough to rescue a pair, and a bare `due
+    12/09` stays text until something can tell an amount from a date."""
+    assert parse_deadline(text, today=TODAY).date is not None
+
+
+@pytest.mark.parametrize("text", [
+    "due 12/09",                                  # the ceiling the cue carve-out leaves
+    "Due to the 3.2% increase in volume, the invoice is unchanged.",
+    "Balance due of 4.5 is shown in table 2.",
+    "Due to demand, GLM 5.2 shipped.",
+    "no amount due 03/07 remains",
+    "Due to the 1-2 gap in the series",
+])
+def test_due_is_ordinary_prose_and_supplies_no_date(text):
+    """The invention class `due` would have opened, recorded as refusals rather than as a
+    footnote in `docs/EVAL.md`: each of these parsed to a confident date with a reminder
+    attached when the cue list was used for the pair rescue. The first case is the honest cost
+    — an invoice that says only `due 12/09` is kept as text — and the rest are the reason."""
+    assert parse_deadline(text, today=TODAY).date is None
 
 
 @pytest.mark.parametrize("text,expect_year", [

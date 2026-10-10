@@ -1478,7 +1478,7 @@ from `june`, hour from the clock, **day from `today`** — `\b` counted `12` and
 standalone numbers, so the day-and-month gate opened and dateutil filled the field the
 text never stated. Same root cause as the bare-year case, one token earlier. Worse, every
 transcript and OCR line the pipeline hands to the parser carries `[MM:SS]` (and
-`[MM:SS] OCR:`) — `app/pipeline/stages.py:381-382` — so `"[00:15] OCR: deadline in
+`[MM:SS] OCR:`) — the `transcript` and `overlay` builders in `app/pipeline/stages.py` — so `"[00:15] OCR: deadline in
 june"` was not a corner case but the normal shape, and even a correctly-parsed date got
 the prefix's minute put into `deadline_iso`: edu-03's saved quote
 `"[00:15] OCR: CLOSES OCT 5"` stored **2026-10-05T00:15**, Oct 5 being right and
@@ -1654,7 +1654,7 @@ however far apart they sit. The candidate is adjacency: the month token has to a
 (ordinal suffix and a single `of` allowed), which is what a human reads as a date.
 
 Measured on the shipped module with only that clause swapped, over the same 2,638 distinct
-sentences at `today` = 2026-09-09 / 10-05 / 11-20: parses **8 → 6**, **kills 2, adds 0,
+sentences (stored library plus the golden set) at `today` = 2026-09-09 / 10-05 / 11-20: parses **8 → 6**, **kills 2, adds 0,
 value-changes 0, confidence-changes 0**, identical at all three dates. Both kills are the
 inventions the October 5 section leaves standing — `[11] There may be…` (May 11) and
 `[29] It may be helpful…` (May 29). Zero confidence changes matters: 0.85 vs 0.75 is what
@@ -1744,16 +1744,206 @@ collapsed-OCR input, forcing it open changes nothing, so that sentence described
 observation, not a mutation. It also flagged the drift-prone commit-count line and the
 self-referential edit narration, both addressed in the handoff. All findings are minor or
 major prose/test-level; none required a parser change, and `app/` is untouched by this
-commit.
+commit. Suite at that point: **428 passed, 3 skipped, 1 xfailed** — superseded by the
+adoption below, which changes the parser.
 
-Full-suite state re-measured on 2026-10-10: **428 passed, 3 skipped, 1 xfailed** (`tests/`
-minus `test_ai_eval.py`). The October 5 records for the same tree are 405 here and 427 in the
-handoff, both correct for the revision each described; the difference is the pair-gate and
-stage-guard cases committed after them, plus the one new test here. **No parser change came
-out of this section** — the adjacency candidate was only ever run through a scratch harness
-that monkeypatched the gate and is now deleted, so the shipped parser is unchanged and
-awaiting the owner's word. The new test carries the two corrected claims, and it can fail:
-forcing `_states_day_and_month` closed makes the `"July13."` assertion raise, which is the
-mutation that matters. Its second half is not a mutation but a fact about the input — the gate
-is already open on the collapsed-OCR run, so the refusal cannot be the gate's doing and can
-only be dateutil's tokenizer.
+## October 10, 2026 (release) — the four deadline decisions adopted, and what the corpus says after
+
+The owner adopted everything priced in the section above, plus the three decisions
+AGENTS.md §3 had reserved: a `due` cue joins `DEADLINE_HINTS`, the B4 value-only fallback is
+reversed, and the duration `xfail` is resolved rather than left open. Implementing them produced
+five further changes, none of which was one of the four and each of which is called out below:
+the elapsed-unit lookahead widened from the numeric shapes to the month-name day positions, made
+case-insensitive, and extended to the singular and the clock suffixes; the month abbreviation's
+period admitted back into the adjacency gate; and `due` shipped as the bigram `due date`, which
+is a **deviation from the decision as authorised** and is argued in its own paragraph.
+
+Measured by loading `git show fdd3210:app/knowledge/deadlines.py` beside the working tree and
+feeding **both** the identical input, so this is a real before/after on shipped code rather
+than a monkeypatched simulation:
+
+| | before | after |
+|---|---|---|
+| parses over the 2,638 distinct sentences (stored library + golden set; 2,526 stored-only) | 8 | **6** |
+| kills | — | 2, both `may` inventions (`May 11`, `May 29`) |
+| adds | — | **0** on this corpus (the `due date` cue does create one parse the old module missed — `the due date is 12/09` — but no stored or golden sentence has that shape) |
+| surviving parses that changed value or confidence | — | **0** |
+| identical at `today` = 09-09 / 10-05 / 11-20 | yes | yes |
+| xfailed tests in the suite | 1 | **0** (the duration case is now a passing test) |
+| full suite | 428 passed / 3 skipped / 1 xfailed (`fdd3210`) | **473 passed / 3 skipped / 0 xfailed** |
+| v0.1 merge gate (the six phase files) | 31 passed / 1 skipped | **31 passed / 1 skipped** |
+
+**What each adopted rule is worth on the corpus, measured separately.** The table above is the
+release's total; a total is not evidence about a rule, so each adopted rule was also reverted
+in place and the same corpus re-screened:
+
+| rule, reverted | corpus sentences the revert makes parse again | parses lost | date value changed |
+|---|---|---|---|
+| month must *abut* its day (vs month-word-anywhere + standalone-number-anywhere) | **2** — the two `may` inventions | 0 | 0 |
+| a number run must not abut an elapsed-time or clock unit | **0** | 0 | 0 |
+| `due date` in `DEADLINE_HINTS` | **0** | 0 | 0 |
+
+Two of the three rules therefore have no measured effect on this library at all, and that is
+worth saying plainly rather than folding into the headline: their evidence is the named forms
+in the test file, which is where the corpus cannot reach. Only the adjacency rule changes the
+corpus, and it changes exactly the two sentences it was priced on.
+
+**The survivor list is smaller, but it is not clean.** The six dates the corpus still produces
+are `APPLY BY SEP 15`, `Apply by September 30 at careers.acme.dev`, `last date October 20th`,
+`CLOSES OCT 5`, `DEADLINE: NOV 30` — all real deadlines — plus `2027-08-06 @ 0.75` from **reel
+22**'s LinkedIn connections screenshot (`ocr_results`, t_s 6.8; reel 16 is the Anthropic
+certifications line that holds `July13.`). That last one is not an invented *date* — the row does
+read `Connected on August 6,2026` — but it is an invented *deadline*: the stored OCR row is one
+glued wall listing six different connection dates (`August25,2026`, `August 6,2026`,
+`July 31,2026`, `July 16,2026`, `July 10,2026`), the parser takes the first month-and-day
+`_MONTH_DAY_ADJACENT` finds, the rolling-year policy pushes a stated 2026 into 2027, and a
+contact's connection date is not a deadline in the first place. It survives because it is
+evidence-shaped, and every rule in this release is a rule about shape. It is also the only
+survivor below the 0.85 numeric branch, which is the one honest signal the stored row offers.
+
+**The unit word is the whole distinction, and review found that it was not one rule but four
+places.** The xfail's duration was one instance of a wider shape: a run of numbers followed by a
+word naming elapsed time. `deadline 3.5 days`, `closes in 2-3 weeks`, `the store closes 5.4
+times a week` and `3 5 20 minutes apart` are the same sentence pattern, and the two numeric
+clauses that admitted them (`_PAIR_SHAPE` and the spaced/separated triples) needed the same one
+lookahead — now `_ELAPSED_UNIT`. Four properties of it came out of the review pass, each of
+which was a hole in the version that first shipped to this branch:
+
+- It applies at the **month-name day positions too**, not only the numeric shapes.
+  `deadline may 11pm` states an hour and returned 2027-05-11 at 0.85 through the adjacency gate,
+  then 0.75 through the month-name branch when the gate was closed, and again through the glued
+  rule as `deadline may11pm`. A day needs the same neighbour check a pair needs — on the
+  position where a day is *free* to be followed by anything, which is the month-then-day order
+  plus the glued rule. The day-then-month positions need no such guard and were stripped of it:
+  those alternatives require a month token immediately after the day, and no month name is in the
+  unit list, so a lookahead there cannot ever fail.
+- It is **case-insensitive**. This library's OCR arrives uppercase, and the patterns that carry
+  the lookahead were compiled without `re.I`, so `DEADLINE 3.5 DAYS`, `CLOSES IN 2-3 WEEKS` and
+  `3 5 20 MINUTES APART` — the exact inventions the rule exists to refuse — all still parsed.
+- It covers the **singular `time` and the plural abbreviations, but not the singular ones**:
+  `times?`, `a.m.`/`p.m.`/`o'clock`, `secs`, `mins`. `the store closes 5.4 time a week` parsed
+  until the plural was made optional; `secs?` and `mins?` then over-reached, because in the
+  papers v0.2.0 ingests `sec` is a section and `min` is a minimum, and the list ate
+  `deadline 12/09 Sec.` — a real deadline — on the way.
+- **A month name is not in it, deliberately**, because a number before a month is a date. The
+  case that proves that escape is `closes 3.4 march` → 2027-03-03 at 0.85; the sentence this
+  section first cited, `closes 12-13 march`, returns None under both the old and the new rule, so
+  it evidenced nothing and has been replaced wherever it appears.
+
+The lookahead is an enumeration, and its ceiling is measured rather than assumed: `deadline 1.2
+million` → 2027-09-01 and `apply by 1.5 km` → 2027-09-01 still parse, because a scale word and a
+distance are not in the list. That is the hint-riding-number residual from the October 5 section
+in a new costume, and adding words to a list is not a rule — it is recorded below rather than
+patched here.
+
+**`due`, and why the shipped cue is the bigram `due date` and not the word.** The owner's
+decision was `due`. Implemented as written it is a regression in the two sources v0.2.0 ingests,
+because `due` is ordinary prose in an invoice or a paper and a hint word does double duty — it
+selects sentences for the rules scan *and* rescues a bare numeric pair from staying text. With
+`due` in the list, each of these invented a confident dated reminder on a probe the corpus does
+not contain: `Due to the 3.2% increase in volume, the invoice is unchanged.` → 2026-09-03,
+`Balance due of 4.5 is shown in table 2.` → 2027-02-04, `Due to demand, GLM 5.2 shipped.` →
+2026-09-05, `no amount due 03/07 remains` → 2027-07-03, `Due to the 1-2 gap in the series` →
+2027-02-01. Every one is the `due … pair` shape that the October 5 section warned about, and the
+reason the corpus screen showed nothing is that none of its 2,638 sentences puts `due` beside a
+pair — "adds 0" there was luck, not evidence. What ships instead is the bigram `due date`, which
+states a deadline and nothing else: `due date 12/09` parses (12 September, dayfirst, 2027 at
+0.85), `due 12/09` stays text, and every form that states its own shape is unaffected —
+`due 15 September`, `due 15/09/2026`, `DUE15SEPTEMBER` all parse. The deviation is recorded here
+because it is not the decision that was authorised: `due` as a *sentence* cue is retained in
+spirit (a `due` line still reaches the parser whenever the rules path is widened again), only
+its pair-rescuing power is withheld, and the price is that `due 12/09` — a real deadline in the
+word order a caption actually uses — stays text for a user to correct in the UI.
+
+On the stored library the shipped hint list changes the scan not at all: **1 candidate sentence
+before, 1 after**, row-by-row across transcript, OCR, caption and document text, and **1 of 28
+reels** produces one (reel 8's prompt-leak line, which states no date). `deadline_iso` remains
+0 rows. So AGENTS.md §8's freeze measurement is unchanged in shape and in conclusion: the
+library still holds nothing to evaluate.
+
+**B4 reversed, and the finding that came with it.** `best_deadline` no longer parses a fact's
+normalized value when its quote yields no date; only a quote — which the ledger has already
+matched against source text — can carry a deadline. Same fact, old code vs new:
+`old = 2026-10-05 @ 0.5` from the model's own value, `new = None`. Two things came out of
+writing that as a stage test. First, the blast radius was smaller than recorded, because the
+ledger only keeps a fact whose **value** is supported by its **quote**, so a value the quote
+cannot support was already dropped before `best_deadline` saw it; the reachable case is a
+value that parses while its enclosing line does not (`invoice 4500 due October 5` — the
+`4500` is read as a year and rejected, the value alone would have parsed). Second, and worth
+more than the B4 change itself: the October 5 stage test
+`test_a_date_the_source_never_states_never_reaches_the_deadline_columns` claimed to exercise
+the fact-boost path and did not — its model reply used `{"deadline": [entry]}` while the stage
+reads `extraction["facts"]`, so no fact was ever created and the test was passing on the rules
+path alone. Its reply is fixed and it now asserts the fact persisted, so the claim in its
+docstring is a premise the test checks rather than a sentence.
+
+**What the release gives up, stated as refusals rather than as prose.** The adjacency rule costs
+a *class*, not a fixed list: any month name and any day that do not touch. Four instances, all
+real deadlines, all measured at `fdd3210` parsing and now text — `the deadline is the 30th of
+next month, in October` (was 2026-10-30 at 0.85, and 0.9 once boosted by a citing fact's
+confidence), `the deadline is on the 5th, in September` (was 2026-09-05), `Apply by the 15th,
+September 2026` (was 2026-09-15, correct), and `closes June 2026, on the 30th` (was 2027-06-30).
+The last two were found by asking how wide the class was rather than by trusting the two examples
+named at adoption; all four are pinned as refusals. Nothing the repository pins is written that
+way — the four golden `expected.deadlines[].date_text` values (`5th of October`, `September 15`,
+`October 20`, `November 30`) parse identically before and after, at 0.85 — and `July13.`,
+`deadline August25,2026`, `expiry 20261015`, `last date 5.9`, `closes 3.4 march` and
+`3.5 august deadline` all still behave as documented. Both ceilings are pinned at the parser level
+*and* the stage level, with the stage test asserting the fact still persists so it cannot pass for
+the wrong reason.
+
+**Mutation-checked, nine mutations, each against the real file.** A before/after table says the
+change did what was intended on the input it was tested on; it says nothing about whether the
+assertions would notice if it did not. Each mutation below was applied to
+`app/knowledge/deadlines.py` itself, the pinned tests run against it, and the file restored and
+SHA-256-checked in a `finally` block — the shipped file is byte-identical to the one measured,
+and every mutation failed at least one assertion.
+
+| mutation (the rule, removed or reverted) | assertions that fail | still passing, and why |
+|---|---|---|
+| month word anywhere + standalone number anywhere | 6 | — |
+| `_ELAPSED_UNIT` emptied | 18 | 15: forms refused by another clause |
+| day-position lookahead removed from the adjacency gate | 4 | 2: held by the month-name branch |
+| day-position lookahead removed from the month-name branch | 4 | 2: held by the gate |
+| day-position lookahead removed from the glued rule | 1 | 5: only the glued form needs it |
+| the abbreviation's period removed from the gate's month token | 5 | 1: `15 Sept.`, where the dot trails the token and was never needed |
+| `due date` relaxed to bare `due` | 6 | — |
+| `due date` removed from the hints entirely | 1 | 4: those forms state their own shape |
+| B4 value-only fallback restored | 3 | 2: the fact with no quote key at all (this mutation puts the fallback inside the quote branch, which that case never enters) and the adjacency-ceiling stage test, which B4 does not touch |
+
+The middle column is the useful one. Removing the gate's day-position lookahead leaves two of
+that test's cases passing because the month-name branch still refuses them — which is why both
+sites are pinned separately, and why the glued rule gets its own row. And the dotted-abbreviation
+case that survives is `15 Sept.`, not the `Oct. 5, 2026` this section first named: that one
+carries no year-bearing shape at all and drops to 0.75 when the dot is removed, failing the
+confidence assertion. `deadline 15/09/2026 sec 3` and `last date 12/09 min 500`, which a review
+pass attributed to the unit list, were re-checked against `fdd3210` and return text under both
+rules — dateutil rejects them for its own reasons (a trailing token it cannot parse, a stray
+`500` read as the year), so they are named as residuals rather than credited to this fix.
+
+Residuals that remain, none of them a date the stored corpus still invents:
+
+- `3.5 august deadline` → 2027-08-03, and `deadline 3.5 august` likewise, at a September `today`.
+  A decimal read as a day when a month is named and no unit word follows; needs sense about the
+  number, not its neighbours.
+- `deadline 1.2 million` and `apply by 1.5 km` → the 1st of whatever month the scan runs in, at
+  whatever year the rolling policy lands on. The unit list has no scale words or distances, and
+  enumerating them is not a rule.
+- `deadline may 11.5pm` → 2027-05-09, and `deadline june 12.30pm` → 2027-06-09: the lookahead
+  spans whitespace only, so a number separated from its clock suffix by a dot still supplies a
+  day, and dateutil takes the day from `today`. Identical at `fdd3210`; the class the clock rule
+  exists to close, reached through punctuation it does not cover.
+- `INVOICE 4500 DUE 15 SEPTEMBER` → text, note "year outside plausible window". The stated
+  `15 SEPTEMBER` is a real deadline, but dateutil reaches it through the numeric branch first,
+  takes `4500` as the year, and the window rejection returns before the month-name branch — which
+  would have read it correctly — is ever consulted. Pre-existing (identical before and after this
+  release), and a control-flow ceiling rather than a policy one. It is worth naming separately
+  because the scanner never even reaches it under the shipped hints: that row produces **no**
+  candidate sentence, since `due` alone is no longer a cue.
+- `July13.` inside a run glued on both sides: dateutil's tokenizer, needs an OCR-aware split.
+- A bare `12/09` with no cue, and `due 12/09`.
+- The non-adjacent month-and-day class above.
+
+The golden extraction eval (`tests/test_ai_eval.py`) was **not** re-run: it needs llama-server,
+and nothing in this change touches prompts, the model, OCR, STT, the evidence matcher or an
+extraction schema — the parser-level golden checks above are the evaluation for it.

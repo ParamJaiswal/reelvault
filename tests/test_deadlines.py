@@ -39,7 +39,8 @@ class TestDeadlines:
     def test_best_deadline_prefers_facts(self):
         from app.knowledge.deadlines import best_deadline
         facts = [{"field": "deadline", "value": "September 15",
-                  "confidence": 0.9, "evidence_source": "transcript"}]
+                  "confidence": 0.9, "evidence_source": "transcript",
+                  "evidence_quote": "closes September 15, apply before then"}]
         d = best_deadline(facts, "apply soon")
         assert d and d.date.month == 9
 
