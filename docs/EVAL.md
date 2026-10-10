@@ -1583,21 +1583,34 @@ separator backreference flips 2; substituting position-blind year adjacency flip
 new assertion can fail, and the two newly *admitted* paths (letter junction, in-shape
 year) have assertions of their own rather than being carried by the refusal list.
 
-Remaining residuals, all pre-existing and none of them a pair the gate can see: the
-duration/range `xfail` (both its spellings carry `deadline`, so the hint still admits
-them); a hint riding on an unrelated number (`the store closes 5.4 times a week` →
-Nov 5); `may` as above; and the spaced triple, whose third numeric component is shape
-evidence not semantic proof (`3 5 20 minutes apart` → 2027-05-03). All four need sense or
-position awareness rather than a wider regex, and the `xfail` reason now names all four
-instead of only the duration.
+Remaining residuals, all pre-existing, each admitted for a reason the gate is built to trust
+rather than refused by it: the duration/range `xfail` (both its spellings carry `deadline`, so
+the hint still admits them); a hint riding on an unrelated number, where the number's first
+component supplies
+the day and **the month comes from `today`** — `the store closes 5.4 times a week` parses
+as `2026-09-05`, `2026-10-05`, `2027-11-05` at the three reference dates, so it schedules a
+reminder for the 5th of whatever month the scan runs in; `may` as above; and the spaced
+triple, whose third numeric component is shape evidence not semantic proof
+(`3 5 20 minutes apart` → `2027-05-03 00:20`). All four need sense or position awareness
+rather than a wider regex, and the `xfail` reason now names all four instead of only the
+duration.
 
-**Not fixed, stated.** `"July13."` (row 95 — glued month+day, *no* year) still returns
-None: dateutil needs the year and the branch needs whitespace, so the collapse is
-survived only when the date keeps its year. The duration `xfail` is unchanged. Also
-standing, measured identical before and after every fix in this section:
-`"3.5 august deadline"` returns **2027-08-03**, a decimal read as a day through the
-month-name branch — the pair-branch rule above does not reach it, and it belongs to the
-same ambiguity decision. (The clock-token leak first recorded here — `"deadline 12:30 in
+**Not fixed, stated.** `"July13."` **parses**: `2027-07-13` at 0.85, identical at all three
+reference dates. A glued month+day with *no* year is handled — `_GLUED_MONTH_DAY` opens the
+gate on its own (that input has no hint word and fails the month-word-plus-day clause), and
+dateutil separates the month from the day, so the rolling-year policy supplies the year. What
+is lost is the date in the stored row-95 line, glued on **both** sides:
+`…comingtotheAnthropicAcademyon July13.Checkbackthen,orreview…` raises `ParserError: Unknown
+string format`, and branch 2 needs whitespace, so the sentence returns None. That is an
+OCR-tokenization limit; the remedy is splitting collapsed OCR runs, not a wider regex. Both
+halves are pinned in `tests/test_deadline_parsing.py`.
+
+The duration `xfail` is unchanged. Also standing, measured identical before and after every
+fix in this section: `"3.5 august deadline"` returns **2027-08-03 @ 0.85**. That is dateutil's
+branch, not the month-name one, which only ever produces 0.75 — the pair's first component is
+read as the day and the month comes from the word, and the gate opens both on the pair plus
+the `deadline` hint and on the month-word-plus-day clause. It belongs to the same ambiguity
+decision. (The clock-token leak first recorded here — `"deadline 12:30 in
 june"` → `2027-06-09T12:30` — is defect 5 above and is fixed.) And the
 field-name direction, now screened, exposes a trust question rather than a parse bug:
 its value-only fallback parses the model's **own normalized value** at 0.5 when the
@@ -1652,14 +1665,37 @@ no month word, 32 a month word with no day, and **12 both** — 9 of them adjace
 Two of those 3 parse today and both are `may` inventions; the third (`At 7 it may seem…`)
 already returns None. So the entire reach of this decision is 3 sentences.
 
-What adjacency costs, from a pinned list of real forms rather than from the corpus (the
-corpus has never produced one): `"deadline is the 30th of next month, in October"` →
-2026-10-30 @ 0.85 becomes text, and `"the deadline is on the 5th, in September"` →
-2026-09-05 becomes text. `"apply by the 3rd of April 2027"`, `"applications close September
-15 for all candidates"` and `"entries accepted 30 April only"` are unchanged. 1 of 31
-pinned golden-shaped forms changes; of 9 hand-written probes, 3 change and **2
-of those 3 are fabrications** (`"it was her 2nd time in October"` → Oct 2,
-`"round 3 in March is harder"` → 2027-03-03 — both die, neither is a date anyone stated).
+What it costs is word order, and nothing the repository pins is written that way. Run over
+every deadline input the repo already treats as authoritative — the four
+`expected.deadlines[].date_text` values in `tests/golden/` and all 99 string literals in
+`tests/test_deadline_parsing.py` — adjacency changes **nothing**: `"5th of October"`
+(edu-03), `"September 15"`, `"October 20"` and `"November 30"` still produce their documented
+date at 0.85, and no test case moves (the single literal in that file whose behaviour differs
+is a comment fragment the scraper captured, not an input). Two real word orders do stop
+parsing, and neither is in anything the repo pins: `"deadline is the 30th of next month, in
+October"` (2026-10-30 @ 0.85 → text) and `"the deadline is on the 5th, in September"`
+(2026-09-05 → text). Of the nine probes written to look for exactly these, three change: that
+second form is lost, and two fabrications die (`"it was her 2nd time in October"` → Oct 2 and
+`"round 3 in March is harder"` → 2027-03-03, neither a date anyone stated). The other six are
+unchanged — two still parse, four were already text under both rules. The candidate
+rule is recorded here so the trade can be re-derived without the harness that measured it:
+
+```
+(?<![:\d])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?<MONTH_TOKEN>
+|<MONTH_TOKEN>\s+(?<![:\d])\d{1,2}(?!\d)(?!:)
+```
+
+`<MONTH_TOKEN>` is the module's existing letter-bounded month alternation, and the
+year-shape, glued-shape and pair-plus-hint clauses of `_states_day_and_month` are untouched;
+only the month-word-plus-anywhere-day clause is replaced.
+
+Two month-bearing stored sentences are already text for reasons this decision does not touch,
+and one is the golden set's own: edu-03's transcript sentence `Enrollment closes on the 5th of
+October, and classes start October tenth.` comes back `unparseable` even though its expected
+`date_text`, `"5th of October"`, parses at 0.85; reel 29's `INVOICE 4500 DUE 15 SEPTEMBER`
+comes back `year outside plausible window` because dateutil reads `4500` as the year. Both
+behave identically under the candidate, so they are not its cost — they say the binding
+constraint on recall here is sentence length and stray numbers, not adjacency.
 
 **Why not a proximity window instead — measured, so the answer is not a preference.** The
 smallest month↔day character gap in each sentence: real forms 4, 5, 5, 19; fabrications 4,
@@ -1672,14 +1708,52 @@ does, and adjacency is exactly what prices the comma-interrupted forms.
 same species as the pair gate above and gets asked the same way. Recommended **yes**, with
 the trade named: §8 says unparseable or ambiguous dates are retained as text rather than
 invented, and what these two parses produce is not a quiet NULL but a dated reminder at
-confidence 0.85; what they cost is a word order the stored library has never contained, and
-0 `deadline_iso` rows today means the price is paid only by future content that splits its
-month from its day. If the owner says no, the two `may` rows stay in the survivor list above
+confidence 0.85; what they cost is a word order nothing the repository pins is written in,
+which the pinned-input check above confirms, and 0 `deadline_iso` rows today means the price
+is paid only by future content that splits its month from its day. If the owner says no, the
+two `may` rows stay in the survivor list above
 as an accepted leak, and the residual paragraph stands.
 
-Full-suite state re-measured on 2026-10-10 at `11c4405`: **427 passed, 3 skipped,
-1 xfailed** (the 405 in the October 5 section was correct for the tree it described; the
-pair-gate and stage-guard cases committed after it account for the difference). No source
-change is pending from this section — every number above came from a scratch harness that
-monkeypatched the gate and is now deleted, so the shipped parser is still the one the
-427-test suite describes.
+**The October 5 claims were re-run, and three of them were wrong.** Every example string
+that section states a result for was fed to the shipped module again: the refusals all still
+return None (`closes at 5.30pm sharp`, `deadline 3.5km` / `12.5hrs` / `1.5x speed`,
+`2026 GLM 5.2`, `batch 2030 mAh, ratio 1/4`, `the 2026 report shows 4.92 growth`,
+`Table 1/4 (2026)`, `ROUND 1/4 - 40s WORK / 20s REST`, `registrations 12/09`,
+`deadline feb 30`, `deadline 12:30 in june`, `deadline in june`) and the admits all still
+return the documented date (`CLOSES OCT 5`, `deadline August25,2026`, `deadline Sep30,2026`,
+`deadline 25august`, `closes 3 Sep`, `last date 5.9`, `3.5 august deadline` → 2027-08-03).
+Three claims about that code did not survive: `"July13."` parses rather than returning None;
+the `5.4 times a week` residual takes its month from `today`, so one fixed date in the prose
+was the wrong shape for it; and `"3.5 august deadline"` returns 0.85, which is dateutil's
+branch, not the month-name branch it was attributed to — that branch only ever produces 0.75.
+The first two came out of the re-run, the third was found by the review pass below. All three
+are corrected in the October 5 section, and the parse/refusal pair is now a test rather than a
+sentence. The lesson is the one this section started with: a doc paragraph is not evidence, and
+a claim about a parser has to be re-run against the parser.
+
+**Review round.** `reviewer` on the change set (docs plus the new test) independently rebuilt
+the adjacency harness and re-measured the corpus claims — 8 → 6, kills 2, adds 0, value 0,
+confidence 0, the 452/32/12/9/3 reach split and both gap tables all reproduced exactly — and
+then contradicted four claims in the prose it was checking: the "1 of 31" count against two
+enumerated losses (now replaced by the repo-wide pinned check above), the xfail reason
+asserting four residual shapes while the marker still named three and carried the `Nov 5`
+date (the marker text is fixed in `tests/test_deadline_parsing.py`, which is the only reason
+this change set touches a file outside `docs/`), the `"3.5 august deadline"` branch
+attribution, and a mutation check that was not one — with the gate already open on the
+collapsed-OCR input, forcing it open changes nothing, so that sentence described an
+observation, not a mutation. It also flagged the drift-prone commit-count line and the
+self-referential edit narration, both addressed in the handoff. All findings are minor or
+major prose/test-level; none required a parser change, and `app/` is untouched by this
+commit.
+
+Full-suite state re-measured on 2026-10-10: **428 passed, 3 skipped, 1 xfailed** (`tests/`
+minus `test_ai_eval.py`). The October 5 records for the same tree are 405 here and 427 in the
+handoff, both correct for the revision each described; the difference is the pair-gate and
+stage-guard cases committed after them, plus the one new test here. **No parser change came
+out of this section** — the adjacency candidate was only ever run through a scratch harness
+that monkeypatched the gate and is now deleted, so the shipped parser is unchanged and
+awaiting the owner's word. The new test carries the two corrected claims, and it can fail:
+forcing `_states_day_and_month` closed makes the `"July13."` assertion raise, which is the
+mutation that matters. Its second half is not a mutation but a fact about the input — the gate
+is already open on the collapsed-OCR run, so the refusal cannot be the gate's doing and can
+only be dateutil's tokenizer.

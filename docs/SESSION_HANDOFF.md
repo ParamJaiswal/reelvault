@@ -1999,11 +1999,13 @@ Verification:
   4 and the weak test list; all three were fixed and re-measured.
 
 Uncertain / not done:
-- `"July13."` (reel 16 row 95) still returns None — the pair rule opens the gate, but a
-  glued month+day **without** a year survives neither dateutil nor branch 2, which needs
-  whitespace. Fixing it means an OCR-aware split, not a wider regex.
+- `"July13."` on its own **parses** (`2027-07-13` @ 0.85) — the glued-without-year shape
+  works, and dateutil needs no year for it. What returns None is reel 16's stored row-95
+  *sentence*, where the date is glued on both sides (`…Academyon July13.Checkbackthen,…`),
+  which dateutil raises `ParserError` on and branch 2 cannot see for want of whitespace.
+  Fixing that means an OCR-aware split, not a wider regex.
 - `"3.5 august deadline"` still → `2027-08-03 @ 0.85`: the clock fix closed the `:`
-  family, the `.` family is the 23-sentence policy question above. Whether `deadline_iso`
+  family, the `.` family is the 24-sentence policy question above. Whether `deadline_iso`
   should ever carry a time-of-day at all is still unpinned by the suite — it now can only
   come from source content, not from the marker, which is the narrower version of the
   same open question.
@@ -2082,21 +2084,60 @@ Done:
   window separates the classes — a window that keeps `"15th, in March"` admits
   `"[29] It may"`. Only lexical adjacency does, and adjacency is exactly what costs
   `"deadline is the 30th of next month, in October"` (2026-10-30 @ 0.85 → text) and
-  `"the deadline is on the 5th, in September"` (→ text). 1 of 31 pinned real-date forms
-  changes; of 9 probes 3 change and 2 of those are fabrications (`"her 2nd time in October"`
-  → Oct 2, `"round 3 in March is harder"` → 2027-03-03).
+  `"the deadline is on the 5th, in September"` (→ text). Neither form is anything the repo
+  pins: run over the four `expected.deadlines[].date_text` values in `tests/golden/` and all
+  99 string literals in `tests/test_deadline_parsing.py`, **nothing changes** — and of nine
+  hand-written probes only three change, one a real loss and two fabrications killed
+  (`"her 2nd time in October"` → Oct 2, `"round 3 in March is harder"` → 2027-03-03). The
+  candidate regex is recorded in `docs/EVAL.md` so this is re-derivable without the harness.
 - Recommendation recorded in `docs/EVAL.md`: **adopt**, with the trade named — §8 prefers
   text over an invented date, and what these parses produce is a dated reminder at 0.85, not
   a quiet NULL. The live library makes the cost hypothetical: re-checked on 2026-10-10,
   28 reels, **`deadline_iso` 0 rows, `reminder_iso` 0 rows**.
+- **Re-ran the October 5 section's examples against the shipped module; three of its claims
+  were wrong.** Every refusal still returns None and every admit still returns its documented
+  date. What did not survive: `"July13."` **parses** to `2027-07-13 @ 0.85` (the section said
+  it returns None — the real failure is the both-sides-glued OCR sentence, which raises
+  `ParserError`); the `5.4 times a week` residual takes its **month from `today`**, so one
+  fixed date for it (`Nov 5`) was the wrong shape (`2026-09-05` / `2026-10-05` / `2027-11-05`
+  at the three reference dates); and `"3.5 august deadline"` returns at 0.85, which is
+  dateutil's branch, not the month-name branch it was attributed to — that branch only ever
+  produces 0.75. The third came from the review pass, not the re-run. Also fixed: this file
+  still said "23-sentence" in the same bullet list that records the corrected 24.
+- **A review pass on the change set, which is what found the branch mis-attribution.** It
+  rebuilt the adjacency harness from the definition in the doc and reproduced the corpus
+  numbers exactly (8 → 6, kills 2, adds 0, value 0, confidence 0; 452/32/12/9/3; both gap
+  tables), then contradicted four prose claims: the pinned-form count, the xfail marker's
+  "three shapes" against the doc's "all four", the branch attribution above, and a mutation
+  check that was not one. All four are fixed; none needed a parser change.
+- **The corrected parse/refusal pair is now a test, not prose.**
+  `test_a_glued_month_and_day_parses_alone_but_not_inside_a_collapsed_ocr_run` in
+  `tests/test_deadline_parsing.py` pins both halves, plus the 0.85 the doc claims. Forcing
+  `_states_day_and_month` closed makes the parse assertion raise, so it can fail. The refusal
+  half is not a mutation but a fact about the input: the gate is already open on the
+  collapsed-OCR run, so the refusal can only be dateutil's tokenizer. No parser code changed.
 
 Verification:
-- `scratch_adjacency_gate.py` (a scratch harness that imports the shipped module and
+- `scratch_adjacency_gate.py` — a scratch harness that imports the shipped module and
   monkeypatches only `_states_day_and_month`, so both rules run the real `parse_deadline` on
-  identical input) — every number above is its output. Deleted after the run; no source
-  change was made and none is pending.
-- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **427 passed, 3 skipped, 1 xfailed**
-  at `11c4405`, tree clean apart from the scratch file and these two docs.
+  identical input. Every corpus number in this section is its output. It was deleted after
+  the run, so re-deriving those numbers means rebuilding it; the shipped parser itself was
+  never touched by it. The candidate rule is written out in `docs/EVAL.md` for that reason.
+- `scratch_pinned_check.py` (also deleted) ran the same comparison over the repo's own
+  pinned deadline inputs — the four golden `expected.deadlines[].date_text` values and the
+  99 string literals scraped from `tests/test_deadline_parsing.py`.
+- The October 5 section's examples re-fed to the shipped module (the lists are in
+  `docs/EVAL.md`): all refusals None, all admits their documented date, except the three
+  claims corrected above.
+- Mutation check on the new test: gate forced closed → `"July13."` returns None, so the
+  parse assertion can fail. The reviewer independently confirmed the same by patching the
+  test module's gate and seeing `AssertionError` at the new test's first assert.
+- `pytest tests/test_deadline_parsing.py -q` → **78 passed, 1 xfailed**.
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **428 passed, 3 skipped, 1 xfailed**
+  (427 before the new test; re-run after the xfail-reason and test edits).
+- v0.1 phase-gate files (`test_phase1_fixes`, `test_phase2_config`,
+  `test_phase3_pipeline_proof`, `test_phase3_queue_failure`, `test_phase5_corrections`,
+  `test_phase7_url_ingest`) → **31 passed, 1 skipped**, unchanged.
 - Read-only query against `file:data/reelvault.db?mode=ro` for the row counts above.
 
 Uncertain / not done:
@@ -2111,9 +2152,10 @@ Next:
 - Owner answer on adjacency (recommended yes), then the three standing decisions:
   `"due"` in `DEADLINE_HINTS` (which now also rescues a bare `12/09`), the B4 value-only
   fallback, the duration-vs-range `xfail`; then the v2 → `main` fast-forward, `v0.2.0` tag
-  and push — the branch is 40 ahead of `origin/v2-hybrid-routing` and nothing has been
-  pushed.
+  and push. Nothing has been pushed; how far ahead the branch is, read with
+  `git rev-list --count origin/v2-hybrid-routing..HEAD` rather than a number written here.
 
-Blockers: none. Not run: the Jev gate (`jev_review` still returns `AI Gateway authentication
-failed`); this turn changes no application source, only documentation, so there was no diff
-for the cavecrew reviewer to bite on.
+Blockers: none. The Jev gate did not run (`jev_review` still returns `AI Gateway
+authentication failed`); the substitute independent pass did — `reviewer` over the whole
+change set, whose four findings are the corrections above. `app/` is untouched by this
+change set; the only file outside `docs/` is a test.

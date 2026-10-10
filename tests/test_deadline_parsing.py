@@ -281,6 +281,25 @@ def test_a_separated_triple_states_a_year_and_needs_no_hint(text):
     assert parse_deadline(text, today=TODAY).date is not None
 
 
+# A slice of reel 16's stored OCR row 95 (`ocr_results`, t_s 9.0), where the source carries
+# no spaces at all.
+_COLLAPSED_OCR_RUN = ("comingtotheAnthropicAcademyon July13.Checkbackthen,orreview "
+                      "theexamguideabovetostart preparingnow")
+
+
+def test_a_glued_month_and_day_parses_alone_but_not_inside_a_collapsed_ocr_run():
+    """The year is not what `July13.` needs: `_GLUED_MONTH_DAY` opens the gate by itself
+    (no hint word, no month-word-plus-day) and dateutil separates the month from the day,
+    giving 2027-07-13 @ 0.85 through the rolling-year policy. The same date inside a run
+    glued on **both** sides still returns None, because dateutil raises ParserError on the
+    whole token. That is tokenization, so the remedy is an OCR-aware split; a wider regex
+    that made the stored sentence parse would be inventing word boundaries the source never
+    had, which is why the refusal is pinned as firmly as the parse."""
+    d = parse_deadline("July13.", today=TODAY)
+    assert d.date == datetime(2027, 7, 13) and d.confidence == 0.85
+    assert parse_deadline(_COLLAPSED_OCR_RUN, today=TODAY).date is None
+
+
 @pytest.mark.parametrize("text", [
     "closes at 5.30pm sharp",            # `closes` is a hint; 5.30 is a time written with a dot
     "deadline 3.5km",
@@ -314,17 +333,20 @@ def test_an_impossible_date_is_kept_as_text_instead_of_raising(text):
     assert "unparseable" in d.note
 
 
-@pytest.mark.xfail(reason="residual, recorded in docs/EVAL.md. Three shapes still invent "
-                          "a date and none of them is a pair the gate can see: a duration "
-                          "('deadline 2029 in 1-2 days' -> 2029-02-01, a range read as the "
-                          "day-month pair); a deadline hint riding on an unrelated numeric "
-                          "('the store closes 5.4 times a week' -> Nov 5, because `closes` "
-                          "is a hint and the gate then trusts the pair); and `may`, which is "
-                          "both a month name and the commonest modal in this corpus, paired "
-                          "with any standalone number ('[11] There may be some very "
-                          "unworldly people' -> May 11 — 2 such sentences survive the full "
-                          "corpus screen). All three need sense or position awareness, not a "
-                          "wider regex, and all three predate the pair gate.", strict=False)
+@pytest.mark.xfail(reason="residual, recorded in docs/EVAL.md. Four shapes still invent a "
+                          "date, and the pair gate admits every one of them for a reason it "
+                          "is built to trust: a duration ('deadline 2029 in 1-2 days' -> "
+                          "2029-02-01, a range read as a day-month pair); a deadline hint "
+                          "riding on an unrelated numeric, where the number gives the day and "
+                          "`today` gives the month, so 'the store closes 5.4 times a week' is "
+                          "the 5th of whatever month the scan runs in; the spaced triple, "
+                          "whose third component is shape evidence and not proof "
+                          "('3 5 20 minutes apart' -> 2027-05-03 00:20); and `may`, both a "
+                          "month name and the commonest modal in this corpus, paired with any "
+                          "standalone number ('[11] There may be some very unworldly people' "
+                          "-> May 11 — 2 such sentences survive the full corpus screen). All "
+                          "four need sense or position awareness rather than a wider regex, "
+                          "and all four predate the pair gate.", strict=False)
 def test_a_duration_is_not_a_day_and_month_pair():
     assert parse_deadline("deadline 2029 in 1-2 days", today=TODAY).date is None
 
