@@ -1933,9 +1933,10 @@ Residuals that remain, none of them a date the stored corpus still invents:
 - A bare `12/09` with no cue, and `due 12/09`.
 - The non-adjacent month-and-day class above.
 
-The first draft of this list also carried `deadline may 11.5pm` → 2027-05-09 and an invoice-line
-recall ceiling; both were closed and reopened as decisions the next day — see the section after
-the tag, which supersedes those two entries.
+Two entries the first draft of this list carried are now resolved rather than residual, and the
+section after the tag records how: the decimal clock forms were a hole in a rule that claimed to
+close them, and the invoice-line recall ceiling turned out to be a decision that had not been
+priced. Read that section as superseding this one on both points.
 
 The golden extraction eval (`tests/test_ai_eval.py`) was **not** re-run: it needs llama-server,
 and nothing in this change touches prompts, the model, OCR, STT, the evidence matcher or an
