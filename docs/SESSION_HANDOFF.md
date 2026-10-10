@@ -2052,3 +2052,68 @@ Next:
   round" is what you meant, this is the commit to revert.
 
 Blockers: none.
+
+---
+
+## The last `may` leak, priced and left unshipped (2026-10-10)
+
+Date: 2026-10-10
+Phase: v2-hybrid-routing — deadline-parser correctness; measuring the residual the
+October 5 work explicitly left standing.
+
+Done:
+- **Priced, did not ship, the adjacency rule for month-name evidence.** Branch 1's gate
+  opens on "a month word anywhere **and** a standalone number anywhere", which is what
+  turns `[11] There may be some very unworldly people…` into May 11 and `[29] It may be
+  helpful always to walk or run the same route…` into May 29. Candidate: the month token
+  must abut the day (ordinal suffix and one optional `of`), which is what a human reads as
+  a date. Over the same 2,638 distinct stored sentences at `today` = 2026-09-09 / 10-05 /
+  11-20: **8 → 6 parses, kills 2, adds 0, value-changes 0, confidence-changes 0**, identical
+  at all three dates. Both kills are the inventions; zero confidence change means no
+  `best_deadline` re-ranking risk in real content (0.85 vs 0.75 is what decides the stored
+  value, so that was the number worth checking).
+- **Accounted for the whole reach instead of sampling it.** Of 2,638 sentences: 452 state a
+  day with no month word, 32 a month word with no day, 12 both — 9 adjacent, 3 non-adjacent.
+  Two of the 3 parse today and both are `may`; the third already returns None. The decision
+  is therefore about 3 sentences of stored text plus word-order forms the library has never
+  produced.
+- **Measured the alternative rather than dismissing it.** Smallest month↔day character gap:
+  real forms 4 / 5 / 5 / 19, fabrications 4 / 5 / 8 / 9. The ranges overlap, so no proximity
+  window separates the classes — a window that keeps `"15th, in March"` admits
+  `"[29] It may"`. Only lexical adjacency does, and adjacency is exactly what costs
+  `"deadline is the 30th of next month, in October"` (2026-10-30 @ 0.85 → text) and
+  `"the deadline is on the 5th, in September"` (→ text). 1 of 31 pinned real-date forms
+  changes; of 9 probes 3 change and 2 of those are fabrications (`"her 2nd time in October"`
+  → Oct 2, `"round 3 in March is harder"` → 2027-03-03).
+- Recommendation recorded in `docs/EVAL.md`: **adopt**, with the trade named — §8 prefers
+  text over an invented date, and what these parses produce is a dated reminder at 0.85, not
+  a quiet NULL. The live library makes the cost hypothetical: re-checked on 2026-10-10,
+  28 reels, **`deadline_iso` 0 rows, `reminder_iso` 0 rows**.
+
+Verification:
+- `scratch_adjacency_gate.py` (a scratch harness that imports the shipped module and
+  monkeypatches only `_states_day_and_month`, so both rules run the real `parse_deadline` on
+  identical input) — every number above is its output. Deleted after the run; no source
+  change was made and none is pending.
+- `pytest tests/ -q --ignore=tests/test_ai_eval.py` → **427 passed, 3 skipped, 1 xfailed**
+  at `11c4405`, tree clean apart from the scratch file and these two docs.
+- Read-only query against `file:data/reelvault.db?mode=ro` for the row counts above.
+
+Uncertain / not done:
+- The candidate rule was exercised through `parse_deadline` only, never through
+  `best_deadline` and the extraction stage. Confidence equality across the corpus is the
+  proxy for "no stored row would change", not a proof of it; if the owner adopts the rule,
+  the stage-level guard in `tests/test_pipeline.py` should be extended to pin a
+  non-adjacent real form as a *text* outcome before it ships.
+- The two `may` rows remain live leaks until the owner answers. Nothing else moved.
+
+Next:
+- Owner answer on adjacency (recommended yes), then the three standing decisions:
+  `"due"` in `DEADLINE_HINTS` (which now also rescues a bare `12/09`), the B4 value-only
+  fallback, the duration-vs-range `xfail`; then the v2 → `main` fast-forward, `v0.2.0` tag
+  and push — the branch is 40 ahead of `origin/v2-hybrid-routing` and nothing has been
+  pushed.
+
+Blockers: none. Not run: the Jev gate (`jev_review` still returns `AI Gateway authentication
+failed`); this turn changes no application source, only documentation, so there was no diff
+for the cavecrew reviewer to bite on.

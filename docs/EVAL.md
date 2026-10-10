@@ -1632,3 +1632,54 @@ over `CLOSES OCT 5`, exactly the outcome §8 forbids.
 neither showed in the tests that version shipped with: they were green while the change
 was actively worse than HEAD on `may` sentences and on impossible dates. Screen the
 adversarial shapes *before* writing the docstring that says what the fix does.
+
+## October 10, 2026 — the two surviving `may` inventions: the fix is measured and priced, not shipped
+
+The rule that lets them through is branch 1's gate — it opens on "a month word anywhere in
+the text **and** a standalone number anywhere in the text", and dateutil then pairs the two
+however far apart they sit. The candidate is adjacency: the month token has to abut the day
+(ordinal suffix and a single `of` allowed), which is what a human reads as a date.
+
+Measured on the shipped module with only that clause swapped, over the same 2,638 distinct
+sentences at `today` = 2026-09-09 / 10-05 / 11-20: parses **8 → 6**, **kills 2, adds 0,
+value-changes 0, confidence-changes 0**, identical at all three dates. Both kills are the
+inventions the October 5 section leaves standing — `[11] There may be…` (May 11) and
+`[29] It may be helpful…` (May 29). Zero confidence changes matters: 0.85 vs 0.75 is what
+decides which date `best_deadline` stores, and nothing in the corpus re-ranks.
+
+The reach is small and it is fully accounted for. Of 2,638 sentences, 452 state a day with
+no month word, 32 a month word with no day, and **12 both** — 9 of them adjacent, 3 not.
+Two of those 3 parse today and both are `may` inventions; the third (`At 7 it may seem…`)
+already returns None. So the entire reach of this decision is 3 sentences.
+
+What adjacency costs, from a pinned list of real forms rather than from the corpus (the
+corpus has never produced one): `"deadline is the 30th of next month, in October"` →
+2026-10-30 @ 0.85 becomes text, and `"the deadline is on the 5th, in September"` →
+2026-09-05 becomes text. `"apply by the 3rd of April 2027"`, `"applications close September
+15 for all candidates"` and `"entries accepted 30 April only"` are unchanged. 1 of 31
+pinned golden-shaped forms changes; of 9 hand-written probes, 3 change and **2
+of those 3 are fabrications** (`"it was her 2nd time in October"` → Oct 2,
+`"round 3 in March is harder"` → 2027-03-03 — both die, neither is a date anyone stated).
+
+**Why not a proximity window instead — measured, so the answer is not a preference.** The
+smallest month↔day character gap in each sentence: real forms 4, 5, 5, 19; fabrications 4,
+5, 8, 9. The ranges overlap, so a window wide enough to keep `"15th, in March"` (5) also
+admits `"[29] It may"` (5), and one that keeps `"3rd of April"` (4) admits
+`"round 3 in March"` (4). No distance separates the two classes; only lexical adjacency
+does, and adjacency is exactly what prices the comma-interrupted forms.
+
+**Status: awaiting the owner's word, deliberately.** It is a recall change, so it is the
+same species as the pair gate above and gets asked the same way. Recommended **yes**, with
+the trade named: §8 says unparseable or ambiguous dates are retained as text rather than
+invented, and what these two parses produce is not a quiet NULL but a dated reminder at
+confidence 0.85; what they cost is a word order the stored library has never contained, and
+0 `deadline_iso` rows today means the price is paid only by future content that splits its
+month from its day. If the owner says no, the two `may` rows stay in the survivor list above
+as an accepted leak, and the residual paragraph stands.
+
+Full-suite state re-measured on 2026-10-10 at `11c4405`: **427 passed, 3 skipped,
+1 xfailed** (the 405 in the October 5 section was correct for the tree it described; the
+pair-gate and stage-guard cases committed after it account for the difference). No source
+change is pending from this section — every number above came from a scratch harness that
+monkeypatched the gate and is now deleted, so the shipped parser is still the one the
+427-test suite describes.
